@@ -90,6 +90,7 @@
       <!--Must-override setting(s).-->
       <ProjectName>GridSolutionsFramework</ProjectName>
       <GitServer>git@github.com:GridProtectionAlliance/gsf.git</GitServer>
+      <GitBranch>eca</GitBranch>
       <VersionBuildChange>Increment</VersionBuildChange>
       <VersionRevisionChange>Reset</VersionRevisionChange>
     </PropertyGroup>

@@ -2346,11 +2346,22 @@ namespace GSF.Data
             if (value == null || value == DBNull.Value)
                 return defaultValue;
 
+            // If the value is an instance of the given type,
+            // no type conversion is necessary
+            if (value is T)
+                return (T)value;
+
             Type type = typeof(T);
 
             // Nullable types cannot be used in type conversion, but we can use Nullable.GetUnderlyingType()
             // to determine whether the type is nullable and convert to the underlying type instead
-            return (T)Convert.ChangeType(value, Nullable.GetUnderlyingType(type) ?? type);
+            Type underlyingType = Nullable.GetUnderlyingType(type) ?? type;
+
+            // Handle Guids as a special case since they do not implement IConvertible
+            if (underlyingType == typeof(Guid))
+                return (T)(object)Guid.Parse(value.ToString());
+
+            return (T)Convert.ChangeType(value, underlyingType);
         }
 
         /// <summary>
@@ -2385,7 +2396,20 @@ namespace GSF.Data
             if (value == null || value == DBNull.Value)
                 return defaultValue;
 
-            return Convert.ChangeType(value, Nullable.GetUnderlyingType(type) ?? type);
+            // If the value is an instance of the given type,
+            // no type conversion is necessary
+            if (type.IsInstanceOfType(value))
+                return value;
+
+            // Nullable types cannot be used in type conversion, but we can use Nullable.GetUnderlyingType()
+            // to determine whether the type is nullable and convert to the underlying type instead
+            Type underlyingType = Nullable.GetUnderlyingType(type) ?? type;
+
+            // Handle Guids as a special case since they do not implement IConvertible
+            if (underlyingType == typeof(Guid))
+                return Guid.Parse(value.ToString());
+
+            return Convert.ChangeType(value, underlyingType);
         }
 
         /// <summary>
@@ -2400,10 +2424,30 @@ namespace GSF.Data
         {
             object value = row.Field<object>(field);
 
-            if ((object)value == null)
+            if (value == null)
                 return null;
 
             return (T)Convert.ChangeType(value, typeof(T));
+        }
+
+        /// <summary>
+        /// Parses a Guid from a database field that is a Guid type or a string representing a Guid.
+        /// </summary>
+        /// <param name="row">The input <see cref="DataRow"/>, which acts as the this instance for the extension method.</param>
+        /// <param name="field">The name of the column to return the value of.</param>
+        /// <param name="defaultValue">The value to be substituted if <see cref="DBNull.Value"/> is retrieved; defaults to <see cref="Guid.Empty"/>.</param>
+        /// <returns>The <see cref="Guid"/> value of the <see cref="DataColumn"/> specified by <paramref name="field"/>.</returns>
+        public static Guid ConvertGuidField(this DataRow row, string field, Guid? defaultValue = null)
+        {
+            object value = row.Field<object>(field);
+
+            if (value == null || value == DBNull.Value)
+                return defaultValue ?? Guid.Empty;
+
+            if (value is Guid)
+                return (Guid)value;
+
+            return Guid.Parse(value.ToString());
         }
 
         #endregion

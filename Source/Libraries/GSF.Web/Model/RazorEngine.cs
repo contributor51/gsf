@@ -108,7 +108,7 @@ namespace GSF.Web.Model
                             if (!resourceName.Contains("."))
                                 resourceName = templatePath + name;
 
-                            Stream stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(resourceName);
+                            Stream stream = WebExtensions.OpenEmbeddedResourceStream(resourceName);
 
                             if ((object)stream == null)
                                 return "";

@@ -25,11 +25,13 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Web;
 using GSF.Collections;
@@ -39,6 +41,7 @@ using GSF.IO;
 using GSF.IO.Checksums;
 using GSF.Reflection;
 using GSF.Web.Model;
+using Microsoft.Ajax.Utilities;
 
 namespace GSF.Web.Hosting
 {
@@ -63,9 +66,11 @@ namespace GSF.Web.Hosting
 
         // Fields
         private readonly string m_webRootPath;
+        private readonly bool m_releaseMode;
         private readonly IRazorEngine m_razorEngineCS;
         private readonly IRazorEngine m_razorEngineVB;
-        private readonly ConcurrentDictionary<string, uint> m_etagCache;
+        private readonly ConcurrentDictionary<string, long> m_etagCache;
+        private readonly ConcurrentDictionary<string, Type> m_handlerTypeCache;
         private readonly ConcurrentDictionary<string, Tuple<Type, Type>> m_pagedViewModelTypes;
         private readonly SafeFileWatcher m_fileWatcher;
         private bool m_disposed;
@@ -82,11 +87,12 @@ namespace GSF.Web.Hosting
         /// <param name="razorEngineVB">Razor engine instance for .vbhtml templates; uses default instance if not provided.</param>
         public WebServer(string webRootPath = null, IRazorEngine razorEngineCS = null, IRazorEngine razorEngineVB = null)
         {
-            bool releaseMode = !AssemblyInfo.EntryAssembly.Debuggable;
-            m_razorEngineCS = razorEngineCS ?? (releaseMode ? RazorEngine<CSharp>.Default : RazorEngine<CSharpDebug>.Default as IRazorEngine);
-            m_razorEngineVB = razorEngineVB ?? (releaseMode ? RazorEngine<VisualBasic>.Default : RazorEngine<VisualBasicDebug>.Default as IRazorEngine);
+            m_releaseMode = !AssemblyInfo.EntryAssembly.Debuggable;
+            m_razorEngineCS = razorEngineCS ?? (m_releaseMode ? RazorEngine<CSharp>.Default : RazorEngine<CSharpDebug>.Default as IRazorEngine);
+            m_razorEngineVB = razorEngineVB ?? (m_releaseMode ? RazorEngine<VisualBasic>.Default : RazorEngine<VisualBasicDebug>.Default as IRazorEngine);
             m_webRootPath = FilePath.AddPathSuffix(webRootPath ?? m_razorEngineCS.TemplatePath);
-            m_etagCache = new ConcurrentDictionary<string, uint>(StringComparer.InvariantCultureIgnoreCase);
+            m_etagCache = new ConcurrentDictionary<string, long>(StringComparer.InvariantCultureIgnoreCase);
+            m_handlerTypeCache = new ConcurrentDictionary<string, Type>(StringComparer.InvariantCultureIgnoreCase);
             m_pagedViewModelTypes = new ConcurrentDictionary<string, Tuple<Type, Type>>(StringComparer.InvariantCultureIgnoreCase);
 
             m_fileWatcher = new SafeFileWatcher(m_webRootPath)
@@ -110,6 +116,33 @@ namespace GSF.Web.Hosting
         /// Gets or sets flag that determines if cache control is enabled for browser clients; default to <c>true</c>.
         /// </summary>
         public bool ClientCacheEnabled
+        {
+            get;
+            set;
+        }
+
+        /// <summary>
+        /// Gets or sets value that determines if minification should be applied to rendered Javascript files.
+        /// </summary>
+        public bool MinifyJavascript
+        {
+            get;
+            set;
+        }
+
+        /// <summary>
+        /// Gets or sets value that determines if minification should be applied to rendered CSS files.
+        /// </summary>
+        public bool MinifyStyleSheets
+        {
+            get;
+            set;
+        }
+
+        /// <summary>
+        /// Gets or sets value that determines if minification should be applied when running a Debug build.
+        /// </summary>
+        public bool UseMinifyInDebug
         {
             get;
             set;
@@ -174,87 +207,220 @@ namespace GSF.Web.Hosting
         /// <summary>
         /// Renders an HTTP response for a given request.
         /// </summary>
-        /// <param name="request">HTTP request instance.</param>
+        /// <param name="request">HTTP request message.</param>
         /// <param name="pageName">Name of page to render.</param>
+        /// <param name="isPost"><c>true</c>if <paramref name="request"/> is HTTP post; otherwise, <c>false</c>.</param>
+        /// <param name="cancellationToken">Propagates notification from client that operations should be canceled.</param>
         /// <param name="model">Reference to model to use when rendering Razor templates, if any.</param>
         /// <param name="modelType">Type of <paramref name="model"/>, if any.</param>
         /// <param name="database"><see cref="AdoDataConnection"/> to use, if any.</param>
-        /// <param name="postData">Any posted data if request is a POST type.</param>
-        /// <returns></returns>
-        public async Task<HttpResponseMessage> RenderResponse(HttpRequestMessage request, string pageName, object model = null, Type modelType = null, AdoDataConnection database = null, dynamic postData = null)
+        /// <returns>HTTP response for provided request.</returns>
+        public async Task<HttpResponseMessage> RenderResponse(HttpRequestMessage request, string pageName, bool isPost, CancellationToken cancellationToken, object model = null, Type modelType = null, AdoDataConnection database = null)
         {
             HttpResponseMessage response = new HttpResponseMessage(HttpStatusCode.OK);
-
             string content, fileExtension = FilePath.GetExtension(pageName).ToLowerInvariant();
+            bool embeddedResource = pageName.StartsWith("@");
             Tuple<Type, Type> pagedViewModelTypes;
+
+            if (embeddedResource)
+                pageName = pageName.Substring(1).Replace('/', '.');
+
+            response.RequestMessage = request;
 
             switch (fileExtension)
             {
                 case ".cshtml":
                     m_pagedViewModelTypes.TryGetValue(pageName, out pagedViewModelTypes);
-                    content = await new RazorView(m_razorEngineCS, pageName, model, modelType, pagedViewModelTypes?.Item1, pagedViewModelTypes?.Item2, database, OnExecutionException).ExecuteAsync(request, postData);
+                    content = await new RazorView(embeddedResource ? RazorEngine<CSharpEmbeddedResource>.Default : m_razorEngineCS, pageName, model, modelType, pagedViewModelTypes?.Item1, pagedViewModelTypes?.Item2, database, OnExecutionException).ExecuteAsync(request, isPost, cancellationToken);
                     response.Content = new StringContent(content, Encoding.UTF8, "text/html");
                     break;
                 case ".vbhtml":
                     m_pagedViewModelTypes.TryGetValue(pageName, out pagedViewModelTypes);
-                    content = await new RazorView(m_razorEngineVB, pageName, model, modelType, pagedViewModelTypes?.Item1, pagedViewModelTypes?.Item2, database, OnExecutionException).ExecuteAsync(request, postData);
+                    content = await new RazorView(embeddedResource ? RazorEngine<VisualBasicEmbeddedResource>.Default : m_razorEngineVB, pageName, model, modelType, pagedViewModelTypes?.Item1, pagedViewModelTypes?.Item2, database, OnExecutionException).ExecuteAsync(request, isPost, cancellationToken);
                     response.Content = new StringContent(content, Encoding.UTF8, "text/html");
                     break;
+                case ".ashx":
+                    await ProcessHTTPHandlerAsync(pageName, embeddedResource, request, response, cancellationToken);
+                    break;
                 default:
-                    string fileName = FilePath.GetAbsolutePath($"{m_webRootPath}{pageName.Replace('/', Path.DirectorySeparatorChar)}");
+                    string fileName = GetResourceFileName(pageName, embeddedResource);
 
-                    if (File.Exists(fileName))
+                    if (ClientCacheEnabled)
                     {
-                        FileStream fileData = null;
-                        uint responseHash = 0;
+                        long responseHash;
 
-                        if (ClientCacheEnabled && !m_etagCache.TryGetValue(fileName, out responseHash))
+                        if (!m_etagCache.TryGetValue(fileName, out responseHash))
                         {
-                            // Calculate check-sum for file
-                            await Task.Run(() =>
+                            if (!ResourceExists(fileName, embeddedResource))
                             {
-                                const int BufferSize = 32768;
-                                byte[] buffer = new byte[BufferSize];
-                                Crc32 calculatedHash = new Crc32();
+                                response.StatusCode = HttpStatusCode.NotFound;
+                                break;
+                            }
 
-                                fileData = File.OpenRead(fileName);
-                                int bytesRead = fileData.Read(buffer, 0, BufferSize);
-
-                                while (bytesRead > 0)
+                            await Task.Run(async () =>
+                            {
+                                using (Stream source = await OpenResourceAsync(fileName, embeddedResource, cancellationToken))
                                 {
-                                    calculatedHash.Update(buffer, 0, bytesRead);
-                                    bytesRead = fileData.Read(buffer, 0, BufferSize);
+                                    // Calculate check-sum for file
+                                    const int BufferSize = 32768;
+                                    byte[] buffer = new byte[BufferSize];
+                                    Crc32 calculatedHash = new Crc32();
+
+                                    int bytesRead = await source.ReadAsync(buffer, 0, BufferSize, cancellationToken);
+
+                                    while (bytesRead > 0)
+                                    {
+                                        calculatedHash.Update(buffer, 0, bytesRead);
+                                        bytesRead = await source.ReadAsync(buffer, 0, BufferSize, cancellationToken);
+                                    }
+
+                                    responseHash = calculatedHash.Value;
+                                    m_etagCache.TryAdd(fileName, responseHash);
+
+                                    OnStatusMessage($"Cache [{responseHash}] added for file \"{fileName}\"");
                                 }
-
-                                responseHash = calculatedHash.Value;
-                                m_etagCache.TryAdd(fileName, responseHash);
-                                fileData.Seek(0, SeekOrigin.Begin);
-
-                                OnStatusMessage($"Cache [{responseHash}] added for file \"{fileName}\"");
-                            });
+                            }, cancellationToken);
                         }
 
                         if (PublishResponseContent(request, response, responseHash))
                         {
-                            if (fileData == null)
-                                fileData = File.OpenRead(fileName);
-
-                            response.Content = await Task.Run(() => new StreamContent(fileData));
+                            response.Content = new StreamContent(await OpenResourceAsync(fileName, embeddedResource, cancellationToken));
                             response.Content.Headers.ContentType = new MediaTypeHeaderValue(MimeMapping.GetMimeMapping(pageName));
-                        }
-                        else
-                        {
-                            fileData?.Dispose();
                         }
                     }
                     else
                     {
-                        response.StatusCode = HttpStatusCode.NotFound;
+                        if (!ResourceExists(fileName, embeddedResource))
+                        {
+                            response.StatusCode = HttpStatusCode.NotFound;
+                            break;
+                        }
+
+                        response.Content = new StreamContent(await OpenResourceAsync(fileName, embeddedResource, cancellationToken));
+                        response.Content.Headers.ContentType = new MediaTypeHeaderValue(MimeMapping.GetMimeMapping(pageName));
                     }
                     break;
             }
 
             return response;
+        }
+
+        private async Task ProcessHTTPHandlerAsync(string pageName, bool embeddedResource, HttpRequestMessage request, HttpResponseMessage response, CancellationToken cancellationToken)
+        {
+            string fileName = GetResourceFileName(pageName, embeddedResource);
+            Type handlerType;
+
+            if (!m_handlerTypeCache.TryGetValue(fileName, out handlerType))
+            {
+                if (!ResourceExists(fileName, embeddedResource))
+                {
+                    response.StatusCode = HttpStatusCode.NotFound;
+                    return;
+                }
+
+                using (Stream source = await OpenResourceAsync(fileName, embeddedResource, cancellationToken))
+                {
+                    string handlerHeader, className;
+
+                    // Parse class name from ASHX handler header parameters
+                    using (StreamReader reader = new StreamReader(source))
+                        handlerHeader = (await reader.ReadToEndAsync()).RemoveCrLfs().Trim();
+
+                    // Clean up header formatting to make parsing easier
+                    handlerHeader = handlerHeader.RemoveDuplicateWhiteSpace().Replace(" =", "=").Replace("= ", "=");
+
+                    string[] tokens = handlerHeader.Split(' ');
+
+                    if (!tokens.Any(token => token.Equals("WebHandler", StringComparison.OrdinalIgnoreCase)))
+                        throw new InvalidOperationException($"Expected \"WebHandler\" file type not found in ASHX file header: {handlerHeader}");
+
+                    Dictionary<string, string> parameters = handlerHeader.ReplaceCaseInsensitive("WebHandler", "").Replace("<%", "").Replace("%>", "").Replace("@", "").Trim().ParseKeyValuePairs(' ');
+
+                    if (!parameters.TryGetValue("Class", out className))
+                        throw new InvalidOperationException($"Missing \"Class\" parameter in ASHX file header: {handlerHeader}");
+
+                    // Remove quotes from class name
+                    className = className.Substring(1, className.Length - 2).Trim();
+
+                    handlerType = AssemblyInfo.FindType(className);
+
+                    if (m_handlerTypeCache.TryAdd(fileName, handlerType))
+                        OnStatusMessage($"Cached handler type [{handlerType?.FullName}] for file \"{fileName}\"");
+                }
+            }
+
+            IHostedHttpHandler handler = null;
+
+            if ((object)handlerType != null)
+                handler = Activator.CreateInstance(handlerType) as IHostedHttpHandler;
+
+            if ((object)handler == null)
+                throw new InvalidOperationException($"Failed to create hosted HTTP handler \"{handlerType?.FullName}\" - make sure class implements IHostedHttpHandler interface.");
+
+            if (ClientCacheEnabled && handler.UseClientCache)
+            {
+                if (PublishResponseContent(request, response, handler.GetContentHash(request)))
+                    await handler.ProcessRequestAsync(request, response, cancellationToken);
+            }
+            else
+            {
+                await handler.ProcessRequestAsync(request, response, cancellationToken);
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private string GetResourceFileName(string pageName, bool embeddedResource)
+        {
+            return embeddedResource ? pageName : FilePath.GetAbsolutePath($"{m_webRootPath}{pageName.Replace('/', Path.DirectorySeparatorChar)}");
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private bool ResourceExists(string fileName, bool embeddedResource)
+        {
+            return embeddedResource ? WebExtensions.EmbeddedResourceExists(fileName) : File.Exists(fileName);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private async Task<Stream> OpenResourceAsync(string fileName, bool embeddedResource, CancellationToken cancellationToken)
+        {
+            Stream stream = embeddedResource ? WebExtensions.OpenEmbeddedResourceStream(fileName) : File.OpenRead(fileName);
+
+            if (!(m_releaseMode || UseMinifyInDebug) || !(MinifyJavascript || MinifyStyleSheets))
+                return stream;
+
+            string extension = FilePath.GetExtension(fileName).Trim().ToLowerInvariant();
+
+            if (string.IsNullOrWhiteSpace(extension))
+                return stream;
+
+            Minifier minifier = new Minifier();
+            Stream minimizedStream = null;
+
+            switch (extension)
+            {
+                case ".js":
+                    if (MinifyJavascript)
+                    {
+                        await Task.Run(async () =>
+                        {
+                            using (StreamReader reader = new StreamReader(stream))
+                                minimizedStream = await minifier.MinifyJavaScript(await reader.ReadToEndAsync()).ToStreamAsync();
+                        }, cancellationToken);                        
+                    }
+                    break;
+                case ".css":
+                    if (MinifyStyleSheets)
+                    {
+                        await Task.Run(async () =>
+                        {
+                            using (StreamReader reader = new StreamReader(stream))
+                                minimizedStream = await minifier.MinifyStyleSheet(await reader.ReadToEndAsync()).ToStreamAsync();
+                        }, cancellationToken);                        
+                    }
+                    break;
+            }
+
+            return minimizedStream ?? stream;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -297,10 +463,14 @@ namespace GSF.Web.Hosting
 
         private void m_fileWatcher_FileChange(object sender, FileSystemEventArgs e)
         {
-            uint responseHash;
+            long responseHash;
+            Type handlerType;
 
             if (m_etagCache.TryRemove(e.FullPath, out responseHash))
                 OnStatusMessage($"Cache [{responseHash}] cleared for file \"{e.FullPath}\"");
+
+            if (m_handlerTypeCache.TryRemove(e.FullPath, out handlerType))
+                OnStatusMessage($"Cleared handler type [{handlerType?.FullName}] from cache for file \"{e.FullPath}\"");
         }
 
         #endregion
@@ -346,10 +516,16 @@ namespace GSF.Web.Hosting
                     CategorizedSettingsElementCollection settings = ConfigurationFile.Current.Settings[category];
                     settings.Add("WebRootPath", "wwwroot", "The root path for the hosted web server files. Location will be relative to install folder if full path is not specified.");
                     settings.Add("ClientCacheEnabled", "true", "Determines if cache control is enabled for web server when rendering content to browser clients.");
+                    settings.Add("MinifyJavascript", "true", "Determines if minification should be applied to rendered Javascript files.");
+                    settings.Add("MinifyStyleSheets", "true", "Determines if minification should be applied to rendered CSS files.");
+                    settings.Add("UseMinifyInDebug", "false", "Determines if minification should be applied when running a Debug build.");
 
                     return new WebServer(FilePath.GetAbsolutePath(settings["WebRootPath"].Value), razorEngineCS, razorEngineVB)
                     {
-                        ClientCacheEnabled = settings["ClientCacheEnabled"].Value.ParseBoolean()
+                        ClientCacheEnabled = settings["ClientCacheEnabled"].Value.ParseBoolean(),
+                        MinifyJavascript = settings["MinifyJavascript"].Value.ParseBoolean(),
+                        MinifyStyleSheets = settings["MinifyStyleSheets"].Value.ParseBoolean(),
+                        UseMinifyInDebug = settings["UseMinifyInDebug"].Value.ParseBoolean()
                     };
                 });
             }

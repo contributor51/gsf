@@ -95,6 +95,7 @@ using System.Runtime.InteropServices;
 using System.Security;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 
 namespace GSF
 {
@@ -145,11 +146,11 @@ namespace GSF
         /// </summary>
         /// <typeparam name="T"><see cref="Type"/> to convert string to.</typeparam>
         /// <param name="value">Source string to convert to type.</param>
-        /// <returns><see cref="String"/> converted to specified <see cref="Type"/>; default value of specified type T if conversion fails.</returns>
+        /// <returns><see cref="string"/> converted to specified <see cref="Type"/>; default value of specified type T if conversion fails.</returns>
         /// <remarks>
-        /// This function makes use of a <see cref="TypeConverter"/> to convert this <see cref="String"/> to the specified type T,
+        /// This function makes use of a <see cref="TypeConverter"/> to convert this <see cref="string"/> to the specified type T,
         /// the best way to make sure <paramref name="value"/> can be converted back to its original type is to use the same
-        /// <see cref="TypeConverter"/> to convert the original object to a <see cref="String"/>; see the
+        /// <see cref="TypeConverter"/> to convert the original object to a <see cref="string"/>; see the
         /// <see cref="Common.TypeConvertToString(object)"/> method for an easy way to do this.
         /// </remarks>
         public static T ConvertToType<T>(this string value)
@@ -163,11 +164,11 @@ namespace GSF
         /// <typeparam name="T"><see cref="Type"/> to convert string to.</typeparam>
         /// <param name="value">Source string to convert to type.</param>
         /// <param name="type"><see cref="Type"/> to convert string to.</param>
-        /// <returns><see cref="String"/> converted to specified <see cref="Type"/>; default value of specified type T if conversion fails.</returns>
+        /// <returns><see cref="string"/> converted to specified <see cref="Type"/>; default value of specified type T if conversion fails.</returns>
         /// <remarks>
-        /// This function makes use of a <see cref="TypeConverter"/> to convert this <see cref="String"/> to the specified <paramref name="type"/>,
+        /// This function makes use of a <see cref="TypeConverter"/> to convert this <see cref="string"/> to the specified <paramref name="type"/>,
         /// the best way to make sure <paramref name="value"/> can be converted back to its original type is to use the same
-        /// <see cref="TypeConverter"/> to convert the original object to a <see cref="String"/>; see the
+        /// <see cref="TypeConverter"/> to convert the original object to a <see cref="string"/>; see the
         /// <see cref="Common.TypeConvertToString(object)"/> method for an easy way to do this.
         /// </remarks>
         public static T ConvertToType<T>(this string value, Type type)
@@ -182,11 +183,11 @@ namespace GSF
         /// <param name="value">Source string to convert to type.</param>
         /// <param name="type"><see cref="Type"/> to convert string to.</param>
         /// <param name="culture"><see cref="CultureInfo"/> to use for the conversion.</param>
-        /// <returns><see cref="String"/> converted to specified <see cref="Type"/>; default value of specified type T if conversion fails.</returns>
+        /// <returns><see cref="string"/> converted to specified <see cref="Type"/>; default value of specified type T if conversion fails.</returns>
         /// <remarks>
-        /// This function makes use of a <see cref="TypeConverter"/> to convert this <see cref="String"/> to the specified <paramref name="type"/>,
+        /// This function makes use of a <see cref="TypeConverter"/> to convert this <see cref="string"/> to the specified <paramref name="type"/>,
         /// the best way to make sure <paramref name="value"/> can be converted back to its original type is to use the same
-        /// <see cref="TypeConverter"/> to convert the original object to a <see cref="String"/>; see the
+        /// <see cref="TypeConverter"/> to convert the original object to a <see cref="string"/>; see the
         /// <see cref="Common.TypeConvertToString(object)"/> method for an easy way to do this.
         /// </remarks>
         public static T ConvertToType<T>(this string value, Type type, CultureInfo culture)
@@ -211,12 +212,56 @@ namespace GSF
 
                 // Handle objects that have type converters (e.g., Enum, Color, Point, etc.)
                 TypeConverter converter = TypeDescriptor.GetConverter(type);
+
+                // ReSharper disable once AssignNullToNotNullAttribute
                 return (T)converter.ConvertFromString(null, culture, value);
             }
             catch
             {
                 return default(T);
             }
+        }
+
+        /// <summary>
+        /// Converts string into a stream using the specified <paramref name="encoding"/>.
+        /// </summary>
+        /// <param name="value">Input to string to convert to a string.</param>
+        /// <param name="encoding">String encoding to use; defaults to <see cref="Encoding.UTF8"/>.</param>
+        /// <returns>String <paramref name="value"/> encoded onto a stream.</returns>
+        public static Stream ToStream(this string value, Encoding encoding = null)
+        {
+            MemoryStream stream = new MemoryStream();
+
+            using (StreamWriter writer = new StreamWriter(stream, encoding ?? Encoding.UTF8, 4096, true))
+            {
+                writer.Write(value);
+                writer.Flush();
+            }
+
+            stream.Position = 0;
+
+            return stream;
+        }
+
+        /// <summary>
+        /// Asynchronously converts string into a stream using the specified <paramref name="encoding"/>.
+        /// </summary>
+        /// <param name="value">Input to string to convert to a string.</param>
+        /// <param name="encoding">String encoding to use; defaults to <see cref="Encoding.UTF8"/>.</param>
+        /// <returns>String <paramref name="value"/> encoded onto a stream.</returns>
+        public static async Task<Stream> ToStreamAsync(this string value, Encoding encoding = null)
+        {
+            MemoryStream stream = new MemoryStream();
+
+            using (StreamWriter writer = new StreamWriter(stream, encoding ?? Encoding.UTF8, 4096, true))
+            {
+                await writer.WriteAsync(value);
+                await writer.FlushAsync();
+            }
+
+            stream.Position = 0;
+
+            return stream;
         }
 
         /// <summary>
@@ -229,7 +274,7 @@ namespace GSF
         public static string[] GetSegments(this string value, int segmentSize)
         {
             if (segmentSize <= 0)
-                throw new ArgumentOutOfRangeException("segmentSize", "segmentSize must be greater than zero.");
+                throw new ArgumentOutOfRangeException(nameof(segmentSize), "segmentSize must be greater than zero.");
 
             if (string.IsNullOrEmpty(value))
                 return new[] { "" };
@@ -268,7 +313,7 @@ namespace GSF
         public static string JoinKeyValuePairs(this IDictionary<string, string> pairs, char parameterDelimiter = ';', char keyValueDelimiter = '=', char startValueDelimiter = '{', char endValueDelimiter = '}')
         {
             if ((object)pairs == null)
-                throw new ArgumentNullException("pairs");
+                throw new ArgumentNullException(nameof(pairs));
 
             char[] delimiters = { parameterDelimiter, keyValueDelimiter };
             List<string> values = new List<string>();
@@ -281,7 +326,7 @@ namespace GSF
                 if (value.IndexOfAny(delimiters) >= 0)
                     value = startValueDelimiter + value + endValueDelimiter;
 
-                values.Add(string.Format("{0}{1}{2}", key, keyValueDelimiter, value));
+                values.Add($"{key}{keyValueDelimiter}{value}");
             }
 
             return string.Join(parameterDelimiter + " ", values);
@@ -323,7 +368,7 @@ namespace GSF
         public static Dictionary<string, string> ParseKeyValuePairs(this string value, char parameterDelimiter = ';', char keyValueDelimiter = '=', char startValueDelimiter = '{', char endValueDelimiter = '}', bool ignoreDuplicateKeys = true)
         {
             if (value == (string)null)
-                throw new ArgumentNullException("value");
+                throw new ArgumentNullException(nameof(value));
 
             if (parameterDelimiter == keyValueDelimiter ||
                 parameterDelimiter == startValueDelimiter ||
@@ -384,7 +429,7 @@ namespace GSF
                     }
                     else
                     {
-                        throw new FormatException(string.Format("Failed to parse key/value pairs: invalid delimiter mismatch. Encountered end value delimiter \'{0}\' before start value delimiter \'{1}\'.", endValueDelimiter, startValueDelimiter));
+                        throw new FormatException($"Failed to parse key/value pairs: invalid delimiter mismatch. Encountered end value delimiter \'{endValueDelimiter}\' before start value delimiter \'{startValueDelimiter}\'.");
                     }
                 }
 
@@ -419,7 +464,7 @@ namespace GSF
                 if (valueEscaped)
                     delimiterDepth = 1;
 
-                throw new FormatException(string.Format("Failed to parse key/value pairs: invalid delimiter mismatch. Encountered more {0} than {1}.", delimiterDepth > 0 ? "start value delimiters \'" + startValueDelimiter + "\'" : "end value delimiters \'" + endValueDelimiter + "\'", delimiterDepth < 0 ? "start value delimiters \'" + startValueDelimiter + "\'" : "end value delimiters \'" + endValueDelimiter + "\'"));
+                throw new FormatException($"Failed to parse key/value pairs: invalid delimiter mismatch. Encountered more {(delimiterDepth > 0 ? "start value delimiters \'" + startValueDelimiter + "\'" : "end value delimiters \'" + endValueDelimiter + "\'")} than {(delimiterDepth < 0 ? "start value delimiters \'" + startValueDelimiter + "\'" : "end value delimiters \'" + endValueDelimiter + "\'")}.");
             }
 
             // Parse key/value pairs from escaped value
@@ -451,7 +496,7 @@ namespace GSF
                     {
                         // Add key elements with unescaped value throwing an exception for encountered duplicate keys
                         if (keyValuePairs.ContainsKey(key))
-                            throw new ArgumentException(string.Format("Failed to parse key/value pairs: duplicate key encountered. Key \"{0}\" is not unique within the string: \"{1}\"", key, value));
+                            throw new ArgumentException($"Failed to parse key/value pairs: duplicate key encountered. Key \"{key}\" is not unique within the string: \"{value}\"");
 
                         keyValuePairs.Add(key, unescapedValue);
                     }
@@ -500,7 +545,7 @@ namespace GSF
         {
             // <pex>
             if (characterTestFunction == (Func<char, bool>)null)
-                throw new ArgumentNullException("characterTestFunction");
+                throw new ArgumentNullException(nameof(characterTestFunction));
             // </pex>
 
             if (string.IsNullOrEmpty(value))
@@ -532,7 +577,7 @@ namespace GSF
         {
             // <pex>
             if (characterTestFunction == (Func<char, bool>)null)
-                throw new ArgumentNullException("characterTestFunction");
+                throw new ArgumentNullException(nameof(characterTestFunction));
             // </pex>
 
             if (string.IsNullOrEmpty(value))
@@ -627,7 +672,7 @@ namespace GSF
         {
             // <pex>
             if (value == (string)null)
-                throw new ArgumentNullException("value");
+                throw new ArgumentNullException(nameof(value));
             // </pex>
 
             return value.Replace(Environment.NewLine, replacementCharacter.ToString()).ReplaceCharacters(replacementCharacter, c => c == '\r' || c == '\n');
@@ -988,7 +1033,7 @@ namespace GSF
         {
             // <pex>
             if (value == (string)null)
-                throw new ArgumentNullException("value");
+                throw new ArgumentNullException(nameof(value));
             // </pex>
 
             return Convert.ToChar(Convert.ToUInt16(value.Replace("\\u", "0x"), 16));
@@ -1002,7 +1047,7 @@ namespace GSF
         /// <para>Performs a base-64 style of string encoding useful for data obfuscation or safe XML data string transmission.</para>
         /// <para>Note: This function encodes a "String". Use the Convert.ToBase64String function to encode a binary data buffer.</para>
         /// </remarks>
-        /// <returns>A <see cref="String"></see> value representing the encoded input of <paramref name="value"/>.</returns>
+        /// <returns>A <see cref="string"></see> value representing the encoded input of <paramref name="value"/>.</returns>
         public static string Base64Encode(this string value)
         {
             return Convert.ToBase64String(Encoding.Unicode.GetBytes(value));
@@ -1014,7 +1059,7 @@ namespace GSF
         /// <param name="value">Input string.</param>
         /// <remarks>Note: This function decodes value back into a "String". Use the Convert.FromBase64String function to decode a base-64 encoded
         /// string back into a binary data buffer.</remarks>
-        /// <returns>A <see cref="String"></see> value representing the decoded input of <paramref name="value"/>.</returns>
+        /// <returns>A <see cref="string"></see> value representing the decoded input of <paramref name="value"/>.</returns>
         public static string Base64Decode(this string value)
         {
             return Encoding.Unicode.GetString(Convert.FromBase64String(value));
@@ -1044,10 +1089,10 @@ namespace GSF
         }
 
         /// <summary>
-        /// Converts the given <see cref="SecureString"/> into a <see cref="String"/>.
+        /// Converts the given <see cref="SecureString"/> into a <see cref="string"/>.
         /// </summary>
         /// <param name="value">The <see cref="SecureString"/> to be converted.</param>
-        /// <returns>The given <see cref="SecureString"/> as a <see cref="String"/>.</returns>
+        /// <returns>The given <see cref="SecureString"/> as a <see cref="string"/>.</returns>
         /// <remarks>
         /// This method is UNSAFE, as it stores your secure string data in clear text in memory.
         /// Since strings are immutable, that memory cannot be cleaned up until all references to
@@ -1079,9 +1124,11 @@ namespace GSF
         /// Converts the provided string into title case (upper case first letter of each word).
         /// </summary>
         /// <param name="value">Input string.</param>
-        /// <remarks>Note: This function performs "ToLower" in input string then applies TextInfo.ToTitleCase for CurrentCulture. This way, even
-        /// strings formatted in all-caps will still be properly formatted.</remarks>
-        /// <returns>A <see cref="String"/> that has the first letter of each word capitalized.</returns>
+        /// <remarks>
+        /// Note: This function performs "ToLower" in input string then applies TextInfo.ToTitleCase for CurrentCulture.
+        /// This way, even strings formatted in all-caps will still be properly formatted.
+        /// </remarks>
+        /// <returns>A <see cref="string"/> that has the first letter of each word capitalized.</returns>
         public static string ToTitleCase(this string value)
         {
             if (string.IsNullOrEmpty(value))
@@ -1091,11 +1138,47 @@ namespace GSF
         }
 
         /// <summary>
+        /// Converts first letter of string to upper-case.
+        /// </summary>
+        /// <param name="value">String to convert to pascal case.</param>
+        /// <returns><paramref name="value"/> with first letter as upper-case.</returns>
+        /// <remarks>
+        /// This function will automatically trim <paramref name="value"/>.
+        /// </remarks>
+        public static string ToPascalCase(this string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return "";
+
+            value = value.Trim();
+
+            return char.ToUpperInvariant(value[0]) + (value.Length > 1 ? value.Substring(1) : "");
+        }
+
+        /// <summary>
+        /// Converts first letter of string to lower-case.
+        /// </summary>
+        /// <param name="value">String to convert to camel case.</param>
+        /// <returns><paramref name="value"/> with first letter as lower-case.</returns>
+        /// <remarks>
+        /// This function will automatically trim <paramref name="value"/>.
+        /// </remarks>
+        public static string ToCamelCase(this string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return "";
+
+            value = value.Trim();
+
+            return char.ToLowerInvariant(value[0]) + (value.Length > 1 ? value.Substring(1) : "");
+        }
+
+        /// <summary>
         /// Truncates the provided string from the left if it is longer that specified length.
         /// </summary>
-        /// <param name="value">A <see cref="String"/> value that is to be truncated.</param>
+        /// <param name="value">A <see cref="string"/> value that is to be truncated.</param>
         /// <param name="maxLength">The maximum number of characters that <paramref name="value"/> can be.</param>
-        /// <returns>A <see cref="String"/> that is the truncated version of the <paramref name="value"/> string.</returns>
+        /// <returns>A <see cref="string"/> that is the truncated version of the <paramref name="value"/> string.</returns>
         public static string TruncateLeft(this string value, int maxLength)
         {
             if (string.IsNullOrEmpty(value))
@@ -1110,9 +1193,9 @@ namespace GSF
         /// <summary>
         /// Truncates the provided string from the right if it is longer that specified length.
         /// </summary>
-        /// <param name="value">A <see cref="String"/> value that is to be truncated.</param>
+        /// <param name="value">A <see cref="string"/> value that is to be truncated.</param>
         /// <param name="maxLength">The maximum number of characters that <paramref name="value"/> can be.</param>
-        /// <returns>A <see cref="String"/> that is the truncated version of the <paramref name="value"/> string.</returns>
+        /// <returns>A <see cref="string"/> that is the truncated version of the <paramref name="value"/> string.</returns>
         public static string TruncateRight(this string value, int maxLength)
         {
             if (string.IsNullOrEmpty(value))
@@ -1132,7 +1215,7 @@ namespace GSF
         /// <remarks>
         /// Handles multiple lines of text separated by Environment.NewLine.
         /// </remarks>
-        /// <param name="value">A <see cref="String"/> to be centered.</param>
+        /// <param name="value">A <see cref="string"/> to be centered.</param>
         /// <param name="maxLength">An <see cref="Int32"/> that is the maximum length of padding.</param>
         /// <returns>The centered string value.</returns>
         public static string CenterText(this string value, int maxLength)
@@ -1148,7 +1231,7 @@ namespace GSF
         /// <remarks>
         /// Handles multiple lines of text separated by <c>Environment.NewLine</c>.
         /// </remarks>
-        /// <param name="value">A <see cref="String"/> to be centered.</param>
+        /// <param name="value">A <see cref="string"/> to be centered.</param>
         /// <param name="maxLength">An <see cref="Int32"/> that is the maximum length of padding.</param>
         /// <param name="paddingCharacter">The <see cref="char"/> value to pad with.</param>
         /// <returns>The centered string value.</returns>

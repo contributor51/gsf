@@ -25,10 +25,8 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
-using System.IO;
 using System.Linq;
 using System.Net.Http;
-using System.Reflection;
 using System.Text;
 using System.Web.Routing;
 using GSF.Collections;
@@ -36,6 +34,7 @@ using GSF.Data;
 using GSF.Data.Model;
 using GSF.Reflection;
 using GSF.Security;
+using GSF.Web.Hubs;
 using RazorEngine.Templating;
 
 // ReSharper disable once StaticMemberInGenericType
@@ -51,6 +50,13 @@ namespace GSF.Web.Model
     public class DataContext : IDisposable
     {
         #region [ Members ]
+
+        // Constants
+
+        /// <summary>
+        /// Defines the regular expression used to validate URLs. 
+        /// </summary>
+        public const string UrlValidation = @"^(?:(?:[a-zA-Z][a-zA-Z0-9.+-]*:\/\/)?[a-zA-Z0-9][a-zA-Z0-9.-]*(?::[0-9]+)?(?:\/[^ ""]*)?|mailto:[a-zA-Z0-9!#$%&'*+-\/=?^_`{|}~][a-zA-Z0-9!#$%&'*+-\/=?^_`{|}~.]*@[a-zA-Z0-9][a-zA-Z0-9.-]*)$";
 
         // Fields
         private AdoDataConnection m_connection;
@@ -288,22 +294,6 @@ namespace GSF.Web.Model
         public ITableOperations Table(Type model)
         {
             return m_tableOperations.GetOrAdd(model, type => Activator.CreateInstance(typeof(TableOperations<>).MakeGenericType(model), Connection, m_exceptionHandler)) as ITableOperations;
-        }
-
-        /// <summary>
-        /// Gets script resource.
-        /// </summary>
-        /// <param name="scriptName">Script name.</param>
-        /// <returns>Script resource contents.</returns>
-        public string GetScriptResource(string scriptName)
-        {
-            Stream stream = Assembly.GetExecutingAssembly().GetManifestResourceStream($"GSF.Web.Model.Scripts.{scriptName}");
-
-            if ((object)stream == null)
-                return "";
-
-            using (StreamReader reader = new StreamReader(stream))
-                return reader.ReadToEnd();
         }
 
         /// <summary>
@@ -570,6 +560,9 @@ namespace GSF.Web.Model
             if (viewBag.DeleteRoles == null)
                 viewBag.DeleteRoles = viewBag.EditRoles;
 
+            // Ensure that the user's roles have been properly initialized
+            SecurityProviderCache.ValidateCurrentProvider();
+
             // Check current allowed roles for user
             viewBag.CanEdit = UserIsInRole(viewBag.EditRoles);
             viewBag.CanAddNew = UserIsInRole(viewBag.AddNewRoles);
@@ -718,17 +711,20 @@ namespace GSF.Web.Model
         /// <typeparam name="THub">SignalR hub that implements <see cref="IRecordOperationsHub"/>.</typeparam>
         /// <param name="viewBag">ViewBag for the view.</param>
         /// <param name="defaultSortField">Default sort field name, defaults to first primary key field. Prefix field name with a minus, i.e., '-', to default to descending sort.</param>
-        /// <param name="hubName">Javascript hub name, defaults to camel-cased <typeparamref name="THub"/> type name.</param>
+        /// <param name="hubScriptName">Javascript hub name, defaults to camel-cased <typeparamref name="THub"/> type name.</param>
         /// <param name="parentKeys">Primary keys values of the parent record to load.</param>
         /// <returns>Rendered paged view model configuration script.</returns>
-        public string RenderViewModelConfiguration<TModel, THub>(dynamic viewBag, string defaultSortField = null, string hubName = null, params object[] parentKeys) where TModel : class, new() where THub : IRecordOperationsHub, new()
+        public string RenderViewModelConfiguration<TModel, THub>(dynamic viewBag, string defaultSortField = null, string hubScriptName = null, params object[] parentKeys) where TModel : class, new() where THub : IRecordOperationsHub, new()
         {
-            RecordOperationsCache cache = s_recordOperationCaches.GetOrAdd(typeof(THub), type =>
+            Type hubType = typeof(THub);
+
+            RecordOperationsCache cache = s_recordOperationCaches.GetOrAdd(hubType, type =>
             {
                 using (THub hub = new THub())
                     return hub.RecordOperationsCache;
             });
-            return RenderViewModelConfiguration<TModel>(cache, viewBag, defaultSortField, hubName ?? ToCamelCase(typeof(THub).Name), parentKeys);
+
+            return RenderViewModelConfiguration<TModel>(cache, viewBag, defaultSortField, hubType.FullName, hubScriptName ?? hubType.Name.ToCamelCase(), parentKeys);
         }
 
         /// <summary>
@@ -738,10 +734,11 @@ namespace GSF.Web.Model
         /// <param name="cache">Data hub record operations cache.</param>
         /// <param name="viewBag">ViewBag for the view.</param>
         /// <param name="defaultSortField">Default sort field name, defaults to first primary key field. Prefix field name with a minus, i.e., '-', to default to descending sort.</param>
-        /// <param name="hubName">Javascript hub name, defaults to "dataHub".</param>
+        /// <param name="hubClassName">Full class name of hub instance, defaults to "GSF.Web.Security.SecurityHub".</param>
+        /// <param name="hubScriptName">Javascript hub name, defaults to "securityHub".</param>
         /// <param name="parentKeys">Primary keys values of the parent record to load.</param>
         /// <returns>Rendered paged view model configuration script.</returns>
-        public string RenderViewModelConfiguration<TModel>(RecordOperationsCache cache, dynamic viewBag, string defaultSortField = null, string hubName = "dataHub", params object[] parentKeys) where TModel : class, new()
+        public string RenderViewModelConfiguration<TModel>(RecordOperationsCache cache, dynamic viewBag, string defaultSortField = null, string hubClassName = "GSF.Web.Security.SecurityHub", string hubScriptName = "securityHub", params object[] parentKeys) where TModel : class, new()
         {
             StringBuilder javascript = new StringBuilder();
             string[] primaryKeyFields = Table<TModel>().GetPrimaryKeyFieldNames(false);
@@ -760,6 +757,8 @@ namespace GSF.Web.Model
                 viewModel.defaultSortField = ""{defaultSortField}"";
                 viewModel.defaultSortAscending = {defaultSortAscending};
                 viewModel.labelField = ""{GetPrimaryLabelField<TModel>()}"";
+                viewModel.modelName = ""{typeof(TModel).FullName}"";
+                viewModel.hubName = ""{hubClassName}"";
                 viewModel.primaryKeyFields = [{primaryKeyFields.Select(fieldName => $"\"{fieldName}\"").ToDelimitedString(", ")}];
             ".FixForwardSpacing());
 
@@ -770,17 +769,20 @@ namespace GSF.Web.Model
 
             // Get method names for records operations of modeled table
             Tuple<string, string>[] recordOperations = cache.GetRecordOperations<TModel>();
-            string queryRecordCountMethod = ToCamelCase(recordOperations[(int)RecordOperation.QueryRecordCount]?.Item1);
-            string queryRecordsMethod = ToCamelCase(recordOperations[(int)RecordOperation.QueryRecords]?.Item1);
-            string deleteRecordMethod = ToCamelCase(recordOperations[(int)RecordOperation.DeleteRecord]?.Item1);
-            string createNewRecordMethod = ToCamelCase(recordOperations[(int)RecordOperation.CreateNewRecord]?.Item1);
-            string addNewRecordMethod = ToCamelCase(recordOperations[(int)RecordOperation.AddNewRecord]?.Item1);
-            string updateMethod = ToCamelCase(recordOperations[(int)RecordOperation.UpdateRecord]?.Item1);
+            string queryRecordCountMethod = recordOperations[(int)RecordOperation.QueryRecordCount]?.Item1.ToCamelCase();
+            string queryRecordsMethod = recordOperations[(int)RecordOperation.QueryRecords]?.Item1.ToCamelCase();
+            string deleteRecordMethod = recordOperations[(int)RecordOperation.DeleteRecord]?.Item1.ToCamelCase();
+            string createNewRecordMethod = recordOperations[(int)RecordOperation.CreateNewRecord]?.Item1.ToCamelCase();
+            string addNewRecordMethod = recordOperations[(int)RecordOperation.AddNewRecord]?.Item1.ToCamelCase();
+            string updateMethod = recordOperations[(int)RecordOperation.UpdateRecord]?.Item1.ToCamelCase();
 
             string keyValues = null;
 
             if (parentKeys.Length > 0)
+            {
                 keyValues = parentKeys.ToDelimitedString(", ");
+                viewBag.ParentKeys = keyValues;
+            }
 
             // If modeled table has IsDeletedField marker, the showDeleted parameter should come first in DataHub operations
             if (showDeletedValue != null)
@@ -789,44 +791,100 @@ namespace GSF.Web.Model
             if (!string.IsNullOrWhiteSpace(queryRecordCountMethod))
                 javascript.Append($@"
                     viewModel.setQueryRecordCount(function (filterText) {{
-                        return {hubName}.{queryRecordCountMethod}({(keyValues == null ? "" : $"{keyValues}, ")} filterText);
+                        return {hubScriptName}.{queryRecordCountMethod}({(keyValues == null ? "" : $"{keyValues}, ")} filterText);
                     }});
                 ".FixForwardSpacing());
 
             if (!string.IsNullOrWhiteSpace(queryRecordsMethod))
                 javascript.Append($@"
                     viewModel.setQueryRecords(function (sortField, ascending, page, pageSize, filterText) {{
-                        return {hubName}.{queryRecordsMethod}({(keyValues == null ? "" : $"{keyValues}, ")}sortField, ascending, page, pageSize, filterText);
+                        return {hubScriptName}.{queryRecordsMethod}({(keyValues == null ? "" : $"{keyValues}, ")}sortField, ascending, page, pageSize, filterText);
                     }});
                 ".FixForwardSpacing());
 
             if (!string.IsNullOrWhiteSpace(deleteRecordMethod))
                 javascript.Append($@"
                     viewModel.setDeleteRecord(function (keyValues) {{
-                        return {hubName}.{deleteRecordMethod}({Enumerable.Range(0, Table<TModel>().GetPrimaryKeyFieldNames().Length).Select(index => $"keyValues[{index}]").ToDelimitedString(", ")});
+                        return {hubScriptName}.{deleteRecordMethod}({Enumerable.Range(0, Table<TModel>().GetPrimaryKeyFieldNames().Length).Select(index => $"keyValues[{index}]").ToDelimitedString(", ")});
                     }});
                 ".FixForwardSpacing());
 
             if (!string.IsNullOrWhiteSpace(createNewRecordMethod))
                 javascript.Append($@"
                     viewModel.setNewRecord(function () {{
-                        return {hubName}.{createNewRecordMethod}();
+                        return {hubScriptName}.{createNewRecordMethod}();
                     }});
                 ".FixForwardSpacing());
 
             if (!string.IsNullOrWhiteSpace(addNewRecordMethod))
                 javascript.Append($@"
                     viewModel.setAddNewRecord(function (record) {{
-                        return {hubName}.{addNewRecordMethod}(record);
+                        return {hubScriptName}.{addNewRecordMethod}(record);
                     }});
                 ".FixForwardSpacing());
 
             if (!string.IsNullOrWhiteSpace(updateMethod))
                 javascript.Append($@"
                     viewModel.setUpdateRecord(function (record) {{
-                        return {hubName}.{updateMethod}(record);
+                        return {hubScriptName}.{updateMethod}(record);
                     }});
                 ".FixForwardSpacing());
+
+            return javascript.ToString();
+        }
+
+        /// <summary>
+        /// Renders client-side Javascript function for looking up single values from a table.
+        /// </summary>
+        /// <typeparam name="TModel">Modeled database table (or view).</typeparam>
+        /// <param name="valueFieldName">Table field name as defined in the table.</param>
+        /// <param name="keyFieldName">Name of primary key field, defaults to "ID".</param>
+        /// <param name="lookupFunctionName">Name of lookup function, defaults to lookup + <typeparamref name="TModel"/> name + <paramref name="valueFieldName"/> + Value.</param>
+        /// <param name="arrayName">Name of value array, defaults to camel cased <typeparamref name="TModel"/> name + <paramref name="valueFieldName"/> + Values.</param>
+        /// <returns>Client-side Javascript lookup function.</returns>
+        public string RenderLookupFunction<TModel>(string valueFieldName, string keyFieldName = "ID", string lookupFunctionName = null, string arrayName = null) where TModel : class, new()
+        {
+            StringBuilder javascript = new StringBuilder();
+
+            if (string.IsNullOrWhiteSpace(lookupFunctionName))
+                lookupFunctionName = $"lookup{typeof(TModel).Name}{valueFieldName}Value";
+
+            if (string.IsNullOrWhiteSpace(arrayName))
+                arrayName = $"{typeof(TModel).Name.ToCamelCase()}{valueFieldName}Values";
+
+            TableOperations<TModel> operations = Table<TModel>();
+            bool keyIsString = operations.GetFieldType(keyFieldName) == typeof(string);
+            bool valueIsString = operations.GetFieldType(valueFieldName) == typeof(string);
+
+            javascript.AppendLine($"var {arrayName} = [];");
+            javascript.AppendLine();
+
+            foreach (TModel record in operations.QueryRecords())
+            {
+                string key = operations.GetFieldValue(record, keyFieldName)?.ToString();
+
+                if (string.IsNullOrEmpty(key))
+                    continue;
+
+                key = key.JavaScriptEncode();
+
+                if (keyIsString)
+                    key = $"\"{key}\"";
+
+                string value = operations.GetFieldValue(record, valueFieldName)?.ToString() ?? "";
+
+                value = value.JavaScriptEncode();
+
+                if (valueIsString)
+                    value = $"\"{value}\"";
+
+                javascript.AppendLine($"        {arrayName}[{key}] = {value};");
+            }
+
+            javascript.AppendLine();
+            javascript.AppendLine($"        function {lookupFunctionName}(value) {{");
+            javascript.AppendLine($"            return {arrayName}[value];");
+            javascript.AppendLine("        }");
 
             return javascript.ToString();
         }
@@ -997,7 +1055,7 @@ namespace GSF.Web.Model
         /// </summary>
         /// <typeparam name="TModel">Modeled table.</typeparam>
         /// <param name="fieldName">Field name for input text field.</param>
-        /// <param name="inputType">Input field type, defaults to text.</param>
+        /// <param name="inputType">Input field type, defaults to appropriate model field type.</param>
         /// <param name="fieldLabel">Label name for input text field, pulls from <see cref="LabelAttribute"/> if defined, otherwise defaults to <paramref name="fieldName"/>.</param>
         /// <param name="fieldID">ID to use for input field; defaults to input + <paramref name="fieldName"/>.</param>
         /// <param name="groupDataBinding">Data-bind operations to apply to outer form-group div, if any.</param>
@@ -1019,10 +1077,20 @@ namespace GSF.Web.Model
             {
                 Type fieldType = tableOperations.GetFieldType(fieldName);
 
-                if (IsNumericType(fieldType))
+                if (IsIntegerType(fieldType))
+                {
                     inputType = "number";
+                    customDataBinding = string.IsNullOrEmpty(customDataBinding) ? "integer" : $"integer, {customDataBinding}";
+                }
+                else if (IsNumericType(fieldType))
+                {
+                    inputType = "number";
+                    customDataBinding = string.IsNullOrEmpty(customDataBinding) ? "numeric" : $"numeric, {customDataBinding}";
+                }
                 else if (fieldType == typeof(DateTime))
+                {
                     inputType = "date";
+                }
             } 
 
             if (string.IsNullOrEmpty(fieldLabel))
@@ -1395,7 +1463,8 @@ namespace GSF.Web.Model
         }
 
         // Static Methods
-        private static bool IsNumericType(Type type)
+
+        private static bool IsIntegerType(Type type)
         {
             return
                 type == typeof(byte) ||
@@ -1407,15 +1476,15 @@ namespace GSF.Web.Model
                 type == typeof(int) ||
                 type == typeof(uint) ||
                 type == typeof(long) ||
-                type == typeof(ulong) ||
+                type == typeof(ulong);
+        }
+
+        private static bool IsNumericType(Type type)
+        {
+            return
                 type == typeof(float) ||
                 type == typeof(double) ||
                 type == typeof(decimal);
-        }
-
-        private static string ToCamelCase(string methodName)
-        {
-            return methodName == null ? null : $"{char.ToLower(methodName[0])}{methodName.Substring(1)}";
         }
 
         #endregion

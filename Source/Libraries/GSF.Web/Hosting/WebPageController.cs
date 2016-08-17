@@ -24,6 +24,7 @@
 using System;
 using System.Collections.Generic;
 using System.Net.Http;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Web.Http;
 using System.Web.Http.Dependencies;
@@ -173,34 +174,36 @@ namespace GSF.Web.Hosting
         /// <summary>
         /// Default page request handler.
         /// </summary>
-        /// <returns></returns>
+        /// <param name="cancellationToken">Propagates notification from client that operations should be canceled.</param>
+        /// <returns>Rendered page result for given page.</returns>
         [Route, HttpGet]
-        public Task<HttpResponseMessage> GetPage()
+        public Task<HttpResponseMessage> GetPage(CancellationToken cancellationToken)
         {
-            return GetPage(DefaultWebPage);
+            return GetPage(DefaultWebPage, cancellationToken);
         }
 
         /// <summary>
         /// Common page request handler.
         /// </summary>
         /// <param name="pageName">Page name to render.</param>
+        /// <param name="cancellationToken">Propagates notification from client that operations should be canceled.</param>
         /// <returns>Rendered page result for given page.</returns>
         [Route("{pageName}"), HttpGet]
-        public Task<HttpResponseMessage> GetPage(string pageName)
+        public Task<HttpResponseMessage> GetPage(string pageName, CancellationToken cancellationToken)
         {
-            return m_webServer.RenderResponse(Request, pageName, Model, ModelType, Database);
+            return m_webServer.RenderResponse(Request, pageName, false, cancellationToken, Model, ModelType, Database);
         }
 
         /// <summary>
         /// Common post request handler.
         /// </summary>
         /// <param name="pageName">Page name to render.</param>
-        /// <param name="postData">Post data.</param>
+        /// <param name="cancellationToken">Propagates notification from client that operations should be canceled.</param>
         /// <returns>Rendered page result for given page.</returns>
         [Route("{pageName}"), HttpPost]
-        public Task<HttpResponseMessage> PostPage(string pageName, dynamic postData)
+        public Task<HttpResponseMessage> PostPage(string pageName, CancellationToken cancellationToken)
         {
-            return m_webServer.RenderResponse(Request, pageName, Model, ModelType, Database, postData);
+            return m_webServer.RenderResponse(Request, pageName, true, cancellationToken, Model, ModelType, Database);
         }
 
         #region [ Sub-folder Handlers ]
@@ -210,11 +213,12 @@ namespace GSF.Web.Hosting
         /// </summary>
         /// <param name="folder1">First folder.</param>
         /// <param name="pageName">Page name to render.</param>
+        /// <param name="cancellationToken">Propagates notification from client that operations should be canceled.</param>
         /// <returns>Rendered page result for given page and path.</returns>
         [Route("{folder1}/{pageName}"), HttpGet]
-        public Task<HttpResponseMessage> GetPage(string folder1, string pageName)
+        public Task<HttpResponseMessage> GetPage(string folder1, string pageName, CancellationToken cancellationToken)
         {
-            return GetPage($"{folder1}/{pageName}");
+            return GetPage($"{folder1}/{pageName}", cancellationToken);
         }
 
         /// <summary>
@@ -222,12 +226,12 @@ namespace GSF.Web.Hosting
         /// </summary>
         /// <param name="folder1">First folder.</param>
         /// <param name="pageName">Page name to render.</param>
-        /// <param name="postData">Post data.</param>
+        /// <param name="cancellationToken">Propagates notification from client that operations should be canceled.</param>
         /// <returns>Rendered page result for given page and path.</returns>
         [Route("{folder1}/{pageName}"), HttpPost]
-        public Task<HttpResponseMessage> PostPage(string folder1, string pageName, dynamic postData)
+        public Task<HttpResponseMessage> PostPage(string folder1, string pageName, CancellationToken cancellationToken)
         {
-            return PostPage($"{folder1}/{pageName}", postData);
+            return PostPage($"{folder1}/{pageName}", cancellationToken);
         }
 
         /// <summary>
@@ -236,11 +240,12 @@ namespace GSF.Web.Hosting
         /// <param name="folder1">First folder.</param>
         /// <param name="folder2">Second folder.</param>
         /// <param name="pageName">Page name to render.</param>
+        /// <param name="cancellationToken">Propagates notification from client that operations should be canceled.</param>
         /// <returns>Rendered page result for given page and path.</returns>
         [Route("{folder1}/{folder2}/{pageName}"), HttpGet]
-        public Task<HttpResponseMessage> GetPage(string folder1, string folder2, string pageName)
+        public Task<HttpResponseMessage> GetPage(string folder1, string folder2, string pageName, CancellationToken cancellationToken)
         {
-            return GetPage($"{folder1}/{folder2}/{pageName}");
+            return GetPage($"{folder1}/{folder2}/{pageName}", cancellationToken);
         }
 
         /// <summary>
@@ -249,12 +254,12 @@ namespace GSF.Web.Hosting
         /// <param name="folder1">First folder.</param>
         /// <param name="folder2">Second folder.</param>
         /// <param name="pageName">Page name to render.</param>
-        /// <param name="postData">Post data.</param>
+        /// <param name="cancellationToken">Propagates notification from client that operations should be canceled.</param>
         /// <returns>Rendered page result for given page and path.</returns>
         [Route("{folder1}/{folder2}/{pageName}"), HttpPost]
-        public Task<HttpResponseMessage> PostPage(string folder1, string folder2, string pageName, dynamic postData)
+        public Task<HttpResponseMessage> PostPage(string folder1, string folder2, string pageName, CancellationToken cancellationToken)
         {
-            return PostPage($"{folder1}/{folder2}/{pageName}", postData);
+            return PostPage($"{folder1}/{folder2}/{pageName}", cancellationToken);
         }
 
         /// <summary>
@@ -264,11 +269,12 @@ namespace GSF.Web.Hosting
         /// <param name="folder2">Second folder.</param>
         /// <param name="folder3">Third folder.</param>
         /// <param name="pageName">Page name to render.</param>
+        /// <param name="cancellationToken">Propagates notification from client that operations should be canceled.</param>
         /// <returns>Rendered page result for given page and path.</returns>
         [Route("{folder1}/{folder2}/{folder3}/{pageName}"), HttpGet]
-        public Task<HttpResponseMessage> GetPage(string folder1, string folder2, string folder3, string pageName)
+        public Task<HttpResponseMessage> GetPage(string folder1, string folder2, string folder3, string pageName, CancellationToken cancellationToken)
         {
-            return GetPage($"{folder1}/{folder2}/{folder3}/{pageName}");
+            return GetPage($"{folder1}/{folder2}/{folder3}/{pageName}", cancellationToken);
         }
 
         /// <summary>
@@ -278,12 +284,12 @@ namespace GSF.Web.Hosting
         /// <param name="folder2">Second folder.</param>
         /// <param name="folder3">Third folder.</param>
         /// <param name="pageName">Page name to render.</param>
-        /// <param name="postData">Post data.</param>
+        /// <param name="cancellationToken">Propagates notification from client that operations should be canceled.</param>
         /// <returns>Rendered page result for given page and path.</returns>
         [Route("{folder1}/{folder2}/{folder3}/{pageName}"), HttpPost]
-        public Task<HttpResponseMessage> PostPage(string folder1, string folder2, string folder3, string pageName, dynamic postData)
+        public Task<HttpResponseMessage> PostPage(string folder1, string folder2, string folder3, string pageName, CancellationToken cancellationToken)
         {
-            return PostPage($"{folder1}/{folder2}/{folder3}/{pageName}", postData);
+            return PostPage($"{folder1}/{folder2}/{folder3}/{pageName}", cancellationToken);
         }
 
         /// <summary>
@@ -294,11 +300,12 @@ namespace GSF.Web.Hosting
         /// <param name="folder3">Third folder.</param>
         /// <param name="folder4">Fourth folder.</param>
         /// <param name="pageName">Page name to render.</param>
+        /// <param name="cancellationToken">Propagates notification from client that operations should be canceled.</param>
         /// <returns>Rendered page result for given page and path.</returns>
         [Route("{folder1}/{folder2}/{folder3}/{folder4}/{pageName}"), HttpGet]
-        public Task<HttpResponseMessage> GetPage(string folder1, string folder2, string folder3, string folder4, string pageName)
+        public Task<HttpResponseMessage> GetPage(string folder1, string folder2, string folder3, string folder4, string pageName, CancellationToken cancellationToken)
         {
-            return GetPage($"{folder1}/{folder2}/{folder3}/{folder4}/{pageName}");
+            return GetPage($"{folder1}/{folder2}/{folder3}/{folder4}/{pageName}", cancellationToken);
         }
 
         /// <summary>
@@ -309,12 +316,12 @@ namespace GSF.Web.Hosting
         /// <param name="folder3">Third folder.</param>
         /// <param name="folder4">Fourth folder.</param>
         /// <param name="pageName">Page name to render.</param>
-        /// <param name="postData">Post data.</param>
+        /// <param name="cancellationToken">Propagates notification from client that operations should be canceled.</param>
         /// <returns>Rendered page result for given page and path.</returns>
         [Route("{folder1}/{folder2}/{folder3}/{folder4}/{pageName}"), HttpPost]
-        public Task<HttpResponseMessage> PostPage(string folder1, string folder2, string folder3, string folder4, string pageName, dynamic postData)
+        public Task<HttpResponseMessage> PostPage(string folder1, string folder2, string folder3, string folder4, string pageName, CancellationToken cancellationToken)
         {
-            return PostPage($"{folder1}/{folder2}/{folder3}/{folder4}/{pageName}", postData);
+            return PostPage($"{folder1}/{folder2}/{folder3}/{folder4}/{pageName}", cancellationToken);
         }
 
         /// <summary>
@@ -326,11 +333,12 @@ namespace GSF.Web.Hosting
         /// <param name="folder4">Fourth folder.</param>
         /// <param name="folder5">Fifth folder.</param>
         /// <param name="pageName">Page name to render.</param>
+        /// <param name="cancellationToken">Propagates notification from client that operations should be canceled.</param>
         /// <returns>Rendered page result for given page and path.</returns>
         [Route("{folder1}/{folder2}/{folder3}/{folder4}/{folder5}/{pageName}"), HttpGet]
-        public Task<HttpResponseMessage> GetPage(string folder1, string folder2, string folder3, string folder4, string folder5, string pageName)
+        public Task<HttpResponseMessage> GetPage(string folder1, string folder2, string folder3, string folder4, string folder5, string pageName, CancellationToken cancellationToken)
         {
-            return GetPage($"{folder1}/{folder2}/{folder3}/{folder4}/{folder5}/{pageName}");
+            return GetPage($"{folder1}/{folder2}/{folder3}/{folder4}/{folder5}/{pageName}", cancellationToken);
         }
 
         /// <summary>
@@ -342,12 +350,212 @@ namespace GSF.Web.Hosting
         /// <param name="folder4">Fourth folder.</param>
         /// <param name="folder5">Fifth folder.</param>
         /// <param name="pageName">Page name to render.</param>
-        /// <param name="postData">Post data.</param>
+        /// <param name="cancellationToken">Propagates notification from client that operations should be canceled.</param>
         /// <returns>Rendered page result for given page and path.</returns>
         [Route("{folder1}/{folder2}/{folder3}/{folder4}/{folder5}/{pageName}"), HttpPost]
-        public Task<HttpResponseMessage> PostPage(string folder1, string folder2, string folder3, string folder4, string folder5, string pageName, dynamic postData)
+        public Task<HttpResponseMessage> PostPage(string folder1, string folder2, string folder3, string folder4, string folder5, string pageName, CancellationToken cancellationToken)
         {
-            return PostPage($"{folder1}/{folder2}/{folder3}/{folder4}/{folder5}/{pageName}", postData);
+            return PostPage($"{folder1}/{folder2}/{folder3}/{folder4}/{folder5}/{pageName}", cancellationToken);
+        }
+
+        /// <summary>
+        /// Sub-folder request handler - depth 6.
+        /// </summary>
+        /// <param name="folder1">First folder.</param>
+        /// <param name="folder2">Second folder.</param>
+        /// <param name="folder3">Third folder.</param>
+        /// <param name="folder4">Fourth folder.</param>
+        /// <param name="folder5">Fifth folder.</param>
+        /// <param name="folder6">Sixth folder.</param>
+        /// <param name="pageName">Page name to render.</param>
+        /// <param name="cancellationToken">Propagates notification from client that operations should be canceled.</param>
+        /// <returns>Rendered page result for given page and path.</returns>
+        [Route("{folder1}/{folder2}/{folder3}/{folder4}/{folder5}/{folder6}/{pageName}"), HttpGet]
+        public Task<HttpResponseMessage> GetPage(string folder1, string folder2, string folder3, string folder4, string folder5, string folder6, string pageName, CancellationToken cancellationToken)
+        {
+            return GetPage($"{folder1}/{folder2}/{folder3}/{folder4}/{folder5}/{folder6}/{pageName}", cancellationToken);
+        }
+
+        /// <summary>
+        /// Sub-folder post handler - depth 6.
+        /// </summary>
+        /// <param name="folder1">First folder.</param>
+        /// <param name="folder2">Second folder.</param>
+        /// <param name="folder3">Third folder.</param>
+        /// <param name="folder4">Fourth folder.</param>
+        /// <param name="folder5">Fifth folder.</param>
+        /// <param name="folder6">Sixth folder.</param>
+        /// <param name="pageName">Page name to render.</param>
+        /// <param name="cancellationToken">Propagates notification from client that operations should be canceled.</param>
+        /// <returns>Rendered page result for given page and path.</returns>
+        [Route("{folder1}/{folder2}/{folder3}/{folder4}/{folder5}/{folder6}/{pageName}"), HttpPost]
+        public Task<HttpResponseMessage> PostPage(string folder1, string folder2, string folder3, string folder4, string folder5, string folder6, string pageName, CancellationToken cancellationToken)
+        {
+            return PostPage($"{folder1}/{folder2}/{folder3}/{folder4}/{folder5}/{folder6}/{pageName}", cancellationToken);
+        }
+
+        /// <summary>
+        /// Sub-folder request handler - depth 7.
+        /// </summary>
+        /// <param name="folder1">First folder.</param>
+        /// <param name="folder2">Second folder.</param>
+        /// <param name="folder3">Third folder.</param>
+        /// <param name="folder4">Fourth folder.</param>
+        /// <param name="folder5">Fifth folder.</param>
+        /// <param name="folder6">Sixth folder.</param>
+        /// <param name="folder7">Seventh folder.</param>
+        /// <param name="pageName">Page name to render.</param>
+        /// <param name="cancellationToken">Propagates notification from client that operations should be canceled.</param>
+        /// <returns>Rendered page result for given page and path.</returns>
+        [Route("{folder1}/{folder2}/{folder3}/{folder4}/{folder5}/{folder6}/{folder7}/{pageName}"), HttpGet]
+        public Task<HttpResponseMessage> GetPage(string folder1, string folder2, string folder3, string folder4, string folder5, string folder6, string folder7, string pageName, CancellationToken cancellationToken)
+        {
+            return GetPage($"{folder1}/{folder2}/{folder3}/{folder4}/{folder5}/{folder6}/{folder7}/{pageName}", cancellationToken);
+        }
+
+        /// <summary>
+        /// Sub-folder post handler - depth 7.
+        /// </summary>
+        /// <param name="folder1">First folder.</param>
+        /// <param name="folder2">Second folder.</param>
+        /// <param name="folder3">Third folder.</param>
+        /// <param name="folder4">Fourth folder.</param>
+        /// <param name="folder5">Fifth folder.</param>
+        /// <param name="folder6">Sixth folder.</param>
+        /// <param name="folder7">Seventh folder.</param>
+        /// <param name="pageName">Page name to render.</param>
+        /// <param name="cancellationToken">Propagates notification from client that operations should be canceled.</param>
+        /// <returns>Rendered page result for given page and path.</returns>
+        [Route("{folder1}/{folder2}/{folder3}/{folder4}/{folder5}/{folder6}/{folder7}/{pageName}"), HttpPost]
+        public Task<HttpResponseMessage> PostPage(string folder1, string folder2, string folder3, string folder4, string folder5, string folder6, string folder7, string pageName, CancellationToken cancellationToken)
+        {
+            return PostPage($"{folder1}/{folder2}/{folder3}/{folder4}/{folder5}/{folder6}/{folder7}/{pageName}", cancellationToken);
+        }
+
+        /// <summary>
+        /// Sub-folder request handler - depth 8.
+        /// </summary>
+        /// <param name="folder1">First folder.</param>
+        /// <param name="folder2">Second folder.</param>
+        /// <param name="folder3">Third folder.</param>
+        /// <param name="folder4">Fourth folder.</param>
+        /// <param name="folder5">Fifth folder.</param>
+        /// <param name="folder6">Sixth folder.</param>
+        /// <param name="folder7">Seventh folder.</param>
+        /// <param name="folder8">Eighth folder.</param>
+        /// <param name="pageName">Page name to render.</param>
+        /// <param name="cancellationToken">Propagates notification from client that operations should be canceled.</param>
+        /// <returns>Rendered page result for given page and path.</returns>
+        [Route("{folder1}/{folder2}/{folder3}/{folder4}/{folder5}/{folder6}/{folder7}/{folder8}/{pageName}"), HttpGet]
+        public Task<HttpResponseMessage> GetPage(string folder1, string folder2, string folder3, string folder4, string folder5, string folder6, string folder7, string folder8, string pageName, CancellationToken cancellationToken)
+        {
+            return GetPage($"{folder1}/{folder2}/{folder3}/{folder4}/{folder5}/{folder6}/{folder7}/{folder8}/{pageName}", cancellationToken);
+        }
+
+        /// <summary>
+        /// Sub-folder post handler - depth 8.
+        /// </summary>
+        /// <param name="folder1">First folder.</param>
+        /// <param name="folder2">Second folder.</param>
+        /// <param name="folder3">Third folder.</param>
+        /// <param name="folder4">Fourth folder.</param>
+        /// <param name="folder5">Fifth folder.</param>
+        /// <param name="folder6">Sixth folder.</param>
+        /// <param name="folder7">Seventh folder.</param>
+        /// <param name="folder8">Eighth folder.</param>
+        /// <param name="pageName">Page name to render.</param>
+        /// <param name="cancellationToken">Propagates notification from client that operations should be canceled.</param>
+        /// <returns>Rendered page result for given page and path.</returns>
+        [Route("{folder1}/{folder2}/{folder3}/{folder4}/{folder5}/{folder6}/{folder7}/{folder8}/{pageName}"), HttpPost]
+        public Task<HttpResponseMessage> PostPage(string folder1, string folder2, string folder3, string folder4, string folder5, string folder6, string folder7, string folder8, string pageName, CancellationToken cancellationToken)
+        {
+            return PostPage($"{folder1}/{folder2}/{folder3}/{folder4}/{folder5}/{folder6}/{folder7}/{folder8}/{pageName}", cancellationToken);
+        }
+
+        /// <summary>
+        /// Sub-folder request handler - depth 9.
+        /// </summary>
+        /// <param name="folder1">First folder.</param>
+        /// <param name="folder2">Second folder.</param>
+        /// <param name="folder3">Third folder.</param>
+        /// <param name="folder4">Fourth folder.</param>
+        /// <param name="folder5">Fifth folder.</param>
+        /// <param name="folder6">Sixth folder.</param>
+        /// <param name="folder7">Seventh folder.</param>
+        /// <param name="folder8">Eighth folder.</param>
+        /// <param name="folder9">Ninth folder.</param>
+        /// <param name="pageName">Page name to render.</param>
+        /// <param name="cancellationToken">Propagates notification from client that operations should be canceled.</param>
+        /// <returns>Rendered page result for given page and path.</returns>
+        [Route("{folder1}/{folder2}/{folder3}/{folder4}/{folder5}/{folder6}/{folder7}/{folder8}/{folder9}/{pageName}"), HttpGet]
+        public Task<HttpResponseMessage> GetPage(string folder1, string folder2, string folder3, string folder4, string folder5, string folder6, string folder7, string folder8, string folder9, string pageName, CancellationToken cancellationToken)
+        {
+            return GetPage($"{folder1}/{folder2}/{folder3}/{folder4}/{folder5}/{folder6}/{folder7}/{folder8}/{folder9}/{pageName}", cancellationToken);
+        }
+
+        /// <summary>
+        /// Sub-folder post handler - depth 9.
+        /// </summary>
+        /// <param name="folder1">First folder.</param>
+        /// <param name="folder2">Second folder.</param>
+        /// <param name="folder3">Third folder.</param>
+        /// <param name="folder4">Fourth folder.</param>
+        /// <param name="folder5">Fifth folder.</param>
+        /// <param name="folder6">Sixth folder.</param>
+        /// <param name="folder7">Seventh folder.</param>
+        /// <param name="folder8">Eighth folder.</param>
+        /// <param name="folder9">Ninth folder.</param>
+        /// <param name="pageName">Page name to render.</param>
+        /// <param name="cancellationToken">Propagates notification from client that operations should be canceled.</param>
+        /// <returns>Rendered page result for given page and path.</returns>
+        [Route("{folder1}/{folder2}/{folder3}/{folder4}/{folder5}/{folder6}/{folder7}/{folder8}/{folder9}/{pageName}"), HttpPost]
+        public Task<HttpResponseMessage> PostPage(string folder1, string folder2, string folder3, string folder4, string folder5, string folder6, string folder7, string folder8, string folder9, string pageName, CancellationToken cancellationToken)
+        {
+            return PostPage($"{folder1}/{folder2}/{folder3}/{folder4}/{folder5}/{folder6}/{folder7}/{folder8}/{folder9}/{pageName}", cancellationToken);
+        }
+
+        /// <summary>
+        /// Sub-folder request handler - depth 10.
+        /// </summary>
+        /// <param name="folder1">First folder.</param>
+        /// <param name="folder2">Second folder.</param>
+        /// <param name="folder3">Third folder.</param>
+        /// <param name="folder4">Fourth folder.</param>
+        /// <param name="folder5">Fifth folder.</param>
+        /// <param name="folder6">Sixth folder.</param>
+        /// <param name="folder7">Seventh folder.</param>
+        /// <param name="folder8">Eighth folder.</param>
+        /// <param name="folder9">Ninth folder.</param>
+        /// <param name="folder10">Tenth folder.</param>
+        /// <param name="pageName">Page name to render.</param>
+        /// <param name="cancellationToken">Propagates notification from client that operations should be canceled.</param>
+        /// <returns>Rendered page result for given page and path.</returns>
+        [Route("{folder1}/{folder2}/{folder3}/{folder4}/{folder5}/{folder6}/{folder7}/{folder8}/{folder9}/{folder10}/{pageName}"), HttpGet]
+        public Task<HttpResponseMessage> GetPage(string folder1, string folder2, string folder3, string folder4, string folder5, string folder6, string folder7, string folder8, string folder9, string folder10, string pageName, CancellationToken cancellationToken)
+        {
+            return GetPage($"{folder1}/{folder2}/{folder3}/{folder4}/{folder5}/{folder6}/{folder7}/{folder8}/{folder9}/{folder10}/{pageName}", cancellationToken);
+        }
+
+        /// <summary>
+        /// Sub-folder post handler - depth 10.
+        /// </summary>
+        /// <param name="folder1">First folder.</param>
+        /// <param name="folder2">Second folder.</param>
+        /// <param name="folder3">Third folder.</param>
+        /// <param name="folder4">Fourth folder.</param>
+        /// <param name="folder5">Fifth folder.</param>
+        /// <param name="folder6">Sixth folder.</param>
+        /// <param name="folder7">Seventh folder.</param>
+        /// <param name="folder8">Eighth folder.</param>
+        /// <param name="folder9">Ninth folder.</param>
+        /// <param name="folder10">Tenth folder.</param>
+        /// <param name="pageName">Page name to render.</param>
+        /// <param name="cancellationToken">Propagates notification from client that operations should be canceled.</param>
+        /// <returns>Rendered page result for given page and path.</returns>
+        [Route("{folder1}/{folder2}/{folder3}/{folder4}/{folder5}/{folder6}/{folder7}/{folder8}/{folder9}/{folder10}/{pageName}"), HttpPost]
+        public Task<HttpResponseMessage> PostPage(string folder1, string folder2, string folder3, string folder4, string folder5, string folder6, string folder7, string folder8, string folder9, string folder10, string pageName, CancellationToken cancellationToken)
+        {
+            return PostPage($"{folder1}/{folder2}/{folder3}/{folder4}/{folder5}/{folder6}/{folder7}/{folder8}/{folder9}/{folder10}/{pageName}", cancellationToken);
         }
 
         #endregion

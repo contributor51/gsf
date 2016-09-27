@@ -33,17 +33,20 @@ using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Reflection;
 using System.Security;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Web;
 using GSF.Collections;
-using GSF.Data;
 using GSF.Data.Model;
 using GSF.Reflection;
 using GSF.Security;
+using GSF.Threading;
 using GSF.Web.Hosting;
 using GSF.Web.Hubs;
+using CancellationToken = System.Threading.CancellationToken;
 
+// ReSharper disable once AccessToDisposedClosure
 namespace GSF.Web.Model.Handlers
 {
     /// <summary>
@@ -52,6 +55,19 @@ namespace GSF.Web.Model.Handlers
     public class CsvDownloadHandler : IHttpHandler, IHostedHttpHandler
     {
         #region [ Members ]
+
+        // Nested Types
+        private class HttpResponseCancellationToken : CompatibleCancellationToken
+        {
+            private readonly HttpResponse m_reponse;
+
+            public HttpResponseCancellationToken(HttpResponse response) : base(CancellationToken.None)
+            {
+                m_reponse = response;
+            }
+
+            public override bool IsCancelled => !m_reponse.IsClientConnected;
+        }
 
         // Constants
         private const string CsvContentType = "text/csv";
@@ -97,6 +113,7 @@ namespace GSF.Web.Model.Handlers
         public void ProcessRequest(HttpContext context)
         {
             HttpResponse response = HttpContext.Current.Response;
+            HttpResponseCancellationToken cancellationToken = new HttpResponseCancellationToken(response);
             NameValueCollection requestParameters = context.Request.QueryString;
 
             response.ClearContent();
@@ -104,15 +121,15 @@ namespace GSF.Web.Model.Handlers
             response.AddHeader("Content-Type", CsvContentType);
             response.AddHeader("Content-Disposition", "attachment;filename=" + GetModelFileName(requestParameters["ModelName"]));
             response.BufferOutput = true;
-            
+
             try
             {
-                CopyModelAsCsvToStreamAsync(requestParameters, response.OutputStream, () => !response.IsClientConnected, () => response.FlushAsync()).ContinueWith(task =>
-                {
-                    if ((object)task.Exception != null)
-                        throw task.Exception;
-                },
-                TaskContinuationOptions.OnlyOnFaulted);
+                CopyModelAsCsvToStream(requestParameters, response.OutputStream, response.Flush, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                LogExceptionHandler?.Invoke(ex);
+                throw;
             }
             finally
             {
@@ -130,17 +147,23 @@ namespace GSF.Web.Model.Handlers
         {
             NameValueCollection requestParameters = request.RequestUri.ParseQueryString();
 
-            response.Content = new PushStreamContent(async (stream, content, context) => 
+            response.Content = new PushStreamContent((stream, content, context) =>
             {
                 try
                 {
-                    await CopyModelAsCsvToStreamAsync(requestParameters, stream, () => cancellationToken.IsCancellationRequested);
+                    CopyModelAsCsvToStream(requestParameters, stream, null, cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    LogExceptionHandler?.Invoke(ex);
+                    throw;
                 }
                 finally
                 {
                     stream.Close();
                 }
-            }, new MediaTypeHeaderValue(CsvContentType));
+            },
+            new MediaTypeHeaderValue(CsvContentType));
 
             response.Content.Headers.ContentDisposition = new ContentDispositionHeaderValue("attachment")
             {
@@ -150,7 +173,7 @@ namespace GSF.Web.Model.Handlers
             return Task.CompletedTask;
         }
 
-        private async Task CopyModelAsCsvToStreamAsync(NameValueCollection requestParameters, Stream responseStream, Func<bool> isCancelled, Func<Task> flushResponseAsync = null)
+        private void CopyModelAsCsvToStream(NameValueCollection requestParameters, Stream responseStream, Action flushResponse, CompatibleCancellationToken cancellationToken)
         {
             SecurityProviderCache.ValidateCurrentProvider();
 
@@ -161,7 +184,6 @@ namespace GSF.Web.Model.Handlers
             bool sortAscending = requestParameters["SortAscending"].ParseBoolean();
             bool showDeleted = requestParameters["ShowDeleted"].ParseBoolean();
             string[] parentKeys = requestParameters["ParentKeys"].Split(',');
-            const int PageSize = 250;
 
             if (string.IsNullOrEmpty(modelName))
                 throw new ArgumentNullException(nameof(modelName), "Cannot download CSV data: no model type name was specified.");
@@ -228,99 +250,168 @@ namespace GSF.Web.Model.Handlers
                 throw new SecurityException($"Cannot download CSV data: failed to instantiate hub type \"{hubName}\" or access record operations, access cannot be validated.", ex);
             }
 
-            using (DataContext dataContext = new DataContext())
-            using (StreamWriter writer = new StreamWriter(responseStream))
+            DataContext dataContext = hub.DataContext;
+
+            // Validate current user has access to requested data
+            if (!dataContext.UserIsInRole(queryRoles))
+                throw new SecurityException($"Cannot download CSV data: access is denied for user \"{Thread.CurrentPrincipal.Identity?.Name ?? "Undefined"}\", minimum required roles = {queryRoles.ToDelimitedString(", ")}.");
+
+            const int TargetBufferSize = 524288;
+
+            StringBuilder readBuffer = new StringBuilder(TargetBufferSize * 2);
+            ManualResetEventSlim bufferReady = new ManualResetEventSlim(false);
+            List<string> writeBuffer = new List<string>();
+            object writeBufferLock = new object();
+            bool readComplete = false;
+
+            ITableOperations table;
+            string[] fieldNames;
+            bool hasDeletedField;
+
+            table = dataContext.Table(modelType);
+            fieldNames = table.GetFieldNames(false);
+            hasDeletedField = !string.IsNullOrEmpty(dataContext.GetIsDeletedFlag(modelType));
+
+            Task readTask = Task.Factory.StartNew(() =>
             {
-                // Validate current user has access to requested data
-                if (!dataContext.UserIsInRole(queryRoles))
-                    throw new SecurityException($"Cannot download CSV data: access is denied for user \"{Thread.CurrentPrincipal.Identity?.Name ?? "Undefined"}\", minimum required roles = {queryRoles.ToDelimitedString(", ")}.");
-
-                AdoDataConnection connection = dataContext.Connection;
-                ITableOperations table = dataContext.Table(modelType);
-                string[] fieldNames = table.GetFieldNames(false);
-
-                Func<Task> flushAsync = async () =>
+                try
                 {
-                    // ReSharper disable once AccessToDisposedClosure
-                    await writer.FlushAsync();
+                    const int PageSize = 250;
 
-                    if ((object)flushResponseAsync != null)
-                        await flushResponseAsync();
-                };
+                    // Get query operation methods
+                    MethodInfo queryRecordCount = hubType.GetMethod(queryRecordCountOperation.Item1);
+                    MethodInfo queryRecords = hubType.GetMethod(queryRecordsOperation.Item1);
 
-                // Write column headers
-                await writer.WriteLineAsync(string.Join(",", fieldNames.Select(fieldName => connection.EscapeIdentifier(fieldName, true))));
-                await flushAsync();
+                    // Setup query parameters
+                    List<object> queryRecordCountParameters = new List<object>();
+                    List<object> queryRecordsParameters = new List<object>();
 
-                // See if modeled table has a flag field that represents a deleted row
-                bool hasDeletedField = !string.IsNullOrEmpty(dataContext.GetIsDeletedFlag(modelType));
+                    // Add current show deleted state parameter, if model defines a show deleted field
+                    if (hasDeletedField)
+                        queryRecordCountParameters.Add(showDeleted);
 
-                // Get query operation methods
-                MethodInfo queryRecordCount = hubType.GetMethod(queryRecordCountOperation.Item1);
-                MethodInfo queryRecords = hubType.GetMethod(queryRecordsOperation.Item1);
+                    // Add any parent key restriction parameters
+                    if (parentKeys.Length > 0 && parentKeys[0].Length > 0)
+                        queryRecordCountParameters.AddRange(parentKeys);
 
-                // Setup query parameters
-                List<object> queryRecordCountParameters = new List<object>();
-                List<object> queryRecordsParameters = new List<object>();
+                    // Add parameters for query records from query record count parameters - they match up to this point
+                    queryRecordsParameters.AddRange(queryRecordCountParameters);
 
-                // Add current show deleted state parameter, if model defines a show deleted field
-                if (hasDeletedField)
-                    queryRecordCountParameters.Add(showDeleted);
+                    // Add sort field parameter
+                    queryRecordsParameters.Add(sortField);
 
-                // Add any parent key restriction parameters
-                if (parentKeys.Length > 0 && parentKeys[0].Length > 0)
-                    queryRecordCountParameters.AddRange(parentKeys);
+                    // Add ascending sort order parameter
+                    queryRecordsParameters.Add(sortAscending);
 
-                // Add parameters for query records from query record count parameters - they match up to this point
-                queryRecordsParameters.AddRange(queryRecordCountParameters);
+                    // Track parameter index for current page to query
+                    int pageParameterIndex = queryRecordsParameters.Count;
 
-                // Add sort field parameter
-                queryRecordsParameters.Add(sortField);
+                    // Add page index parameter
+                    queryRecordsParameters.Add(0);
 
-                // Add ascending sort order parameter
-                queryRecordsParameters.Add(sortAscending);
+                    // Add page size parameter
+                    queryRecordsParameters.Add(PageSize);
 
-                // Track parameter index for current page to query
-                int pageParameterIndex = queryRecordsParameters.Count;
+                    // Add filter text parameter
+                    queryRecordCountParameters.Add(filterText);
+                    queryRecordsParameters.Add(filterText);
 
-                // Add page index parameter
-                queryRecordsParameters.Add(0);
+                    // Read queried records in page sets so there is not a memory burden and long initial query delay on very large data sets
+                    int recordCount = (int)queryRecordCount.Invoke(hub, queryRecordCountParameters.ToArray());
+                    int totalPages = Math.Max((int)Math.Ceiling(recordCount / (double)PageSize), 1);
 
-                // Add page size parameter
-                queryRecordsParameters.Add(PageSize);
-
-                // Add filter text parameter
-                queryRecordCountParameters.Add(filterText);
-                queryRecordsParameters.Add(filterText);
-
-                // Read queried records in page sets so there is not a memory burden and long initial query delay on very large data sets
-                int recordCount = (int)queryRecordCount.Invoke(hub, queryRecordCountParameters.ToArray());
-                int totalPages = Math.Max((int)Math.Ceiling(recordCount / (double)PageSize), 1);
-
-                // Write data pages
-                for (int page = 0; page < totalPages && !isCancelled(); page++)
-                {
-                    // Update desired page to query
-                    queryRecordsParameters[pageParameterIndex] = page + 1;
-
-                    // Query page records
-                    IEnumerable records = queryRecords.Invoke(hub, queryRecordsParameters.ToArray()) as IEnumerable ?? Enumerable.Empty<object>();
-                    int exportCount = 0;
-
-                    // Export page records
-                    foreach (object record in records)
+                    // Read data pages
+                    for (int page = 0; page < totalPages && !cancellationToken.IsCancelled; page++)
                     {
-                        // Periodically check for client cancellation
-                        if (exportCount++ % (PageSize / 4) == 0 && isCancelled())
-                            break;
+                        // Update desired page to query
+                        queryRecordsParameters[pageParameterIndex] = page + 1;
 
-                        await writer.WriteLineAsync(string.Join(",", fieldNames.Select(fieldName => $"\"{table.GetFieldValue(record, fieldName)}\"")));
+                        // Query page records
+                        IEnumerable records = queryRecords.Invoke(hub, queryRecordsParameters.ToArray()) as IEnumerable ?? Enumerable.Empty<object>();
+                        int exportCount = 0;
+
+                        // Export page records
+                        foreach (object record in records)
+                        {
+                            // Periodically check for client cancellation
+                            if (exportCount++ % (PageSize / 4) == 0 && cancellationToken.IsCancelled)
+                                break;
+
+                            readBuffer.AppendLine(string.Join(",", fieldNames.Select(fieldName => $"\"{table.GetFieldValue(record, fieldName)}\"")));
+
+                            if (readBuffer.Length < TargetBufferSize)
+                                continue;
+
+                            lock (writeBufferLock)
+                                writeBuffer.Add(readBuffer.ToString());
+
+                            readBuffer.Clear();
+                            bufferReady.Set();
+                        }
                     }
 
-                    await flushAsync();
+                    if (readBuffer.Length > 0)
+                    {
+                        lock (writeBufferLock)
+                            writeBuffer.Add(readBuffer.ToString());
+                    }
                 }
-            }
+                finally
+                {
+                    readComplete = true;
+                    bufferReady.Set();
+                }
+            },
+            cancellationToken);
+
+            Task writeTask = Task.Factory.StartNew(() =>
+            {
+                using (StreamWriter writer = new StreamWriter(responseStream))
+                {
+                    //Ticks exportStart = DateTime.UtcNow.Ticks;
+                    string[] localBuffer;
+
+                    Action flushStream = () =>
+                    {
+                        writer.Flush();
+
+                        if ((object)flushResponse != null)
+                            flushResponse();
+                    };
+
+                    // Write column headers
+                    writer.WriteLine(string.Join(",", fieldNames.Select(fieldName => $"\"{fieldName}\"")));
+                    flushStream();
+
+                    while ((writeBuffer.Count > 0 || !readComplete) && !cancellationToken.IsCancelled)
+                    {
+                        bufferReady.Wait(cancellationToken);
+                        bufferReady.Reset();
+
+                        lock (writeBufferLock)
+                        {
+                            localBuffer = writeBuffer.ToArray();
+                            writeBuffer.Clear();
+                        }
+
+                        foreach (string buffer in localBuffer)
+                            writer.Write(buffer);
+                    }
+
+                    // Flush stream
+                    flushStream();
+                    //Debug.WriteLine("Export time: " + (DateTime.UtcNow.Ticks - exportStart).ToElapsedTimeString(3));
+                }
+            },
+            cancellationToken);
+
+            Task.WaitAll(readTask, writeTask);
         }
+
+        /// <summary>
+        /// Defines any exception handler for any thrown exceptions.
+        /// </summary>
+        public static Action<Exception> LogExceptionHandler;
 
         private static string GetModelFileName(string modelName)
         {

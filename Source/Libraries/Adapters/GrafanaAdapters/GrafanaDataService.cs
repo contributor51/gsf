@@ -1,0 +1,238 @@
+﻿//******************************************************************************************************
+//  GrafanaDataService.cs - Gbtc
+//
+//  Copyright © 2016, Grid Protection Alliance.  All Rights Reserved.
+//
+//  Licensed to the Grid Protection Alliance (GPA) under one or more contributor license agreements. See
+//  the NOTICE file distributed with this work for additional information regarding copyright ownership.
+//  The GPA licenses this file to you under the MIT License (MIT), the "License"; you may not use this
+//  file except in compliance with the License. You may obtain a copy of the License at:
+//
+//      http://opensource.org/licenses/MIT
+//
+//  Unless agreed to in writing, the subject software distributed under the License is distributed on an
+//  "AS-IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. Refer to the
+//  License for the specific language governing permissions and limitations.
+//
+//  Code Modification History:
+//  ----------------------------------------------------------------------------------------------------
+//  09/12/2016 - Ritchie Carroll
+//       Generated original version of source code.
+//
+//******************************************************************************************************
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.ServiceModel;
+using System.Threading;
+using System.Threading.Tasks;
+using GSF;
+using GSF.Historian;
+using GSF.Historian.DataServices;
+using HistorianAdapters;
+
+namespace GrafanaAdapters
+{
+    /// <summary>
+    /// Represents a REST based API for a simple JSON based Grafana data source for the openHistorian 1.0.
+    /// </summary>
+    [ServiceBehavior(InstanceContextMode = InstanceContextMode.Single, ConcurrencyMode = ConcurrencyMode.Multiple)]
+    public class GrafanaDataService : DataService, IGrafanaDataService
+    {
+        #region [ Members ]
+
+        // Nested Types
+        private class HistorianDataSource : GrafanaDataSourceBase
+        {
+            private readonly GrafanaDataService m_parent;
+
+            public HistorianDataSource(GrafanaDataService parent)
+            {
+                m_parent = parent;
+            }
+
+            protected override List<TimeSeriesValues> QueryTimeSeriesValues(DateTime startTime, DateTime stopTime, int maxDataPoints, Dictionary<ulong, string> targetMap, CancellationToken cancellationToken)
+            {
+                List<TimeSeriesValues> queriedTimeSeriesValues = new List<TimeSeriesValues>();
+                long baseTicks = UnixTimeTag.BaseTicks.Value;
+
+                if (targetMap.Count > 0)
+                {
+                    foreach (ulong measurementID in targetMap.Keys)
+                    {
+                        if (cancellationToken.IsCancellationRequested)
+                            break;
+
+                        TimeSeriesValues series = new TimeSeriesValues { target = targetMap[measurementID], datapoints = new List<double[]>() };
+                        IDataPoint[] data = m_parent.Archive.ReadData((int)measurementID, startTime, stopTime, false).ToArray();
+                        int interval = data.Length / maxDataPoints + 1;
+                        int pointCount = 0;
+
+                        series.datapoints.AddRange(data.Where(point => pointCount++ % interval == 0).Select(point => new[] { point.Value, (point.Time.ToDateTime().Ticks - baseTicks) / (double)Ticks.PerMillisecond }));
+
+                        queriedTimeSeriesValues.Add(series);
+                    }
+                }
+
+                return queriedTimeSeriesValues;
+            }
+        }
+
+        // Fields
+        private readonly HistorianDataSource m_dataSource;
+        private CancellationTokenSource m_cancellationSource;
+        private bool m_disposed;
+
+        #endregion
+
+        #region [ Constructors ]
+
+        /// <summary>
+        /// Creates a new instance of a <see cref="GrafanaDataService"/>.
+        /// </summary>
+        public GrafanaDataService()
+        {
+            m_dataSource = new HistorianDataSource(this);
+            m_cancellationSource = new CancellationTokenSource();
+            Endpoints = "http.rest://localhost:6057/api/grafana/";
+            ServiceEnabled = false;
+        }
+
+        #endregion
+
+        #region [ Properties ]
+
+        /// <summary>
+        /// Gets or sets a boolean value that indicates whether the web service is currently enabled.
+        /// </summary>
+        public override bool Enabled
+        {
+            get
+            {
+                return base.Enabled;
+            }
+            set
+            {
+                base.Enabled = value;
+
+                // Cancel any running queries if web service gets disabled
+                if (!value)
+                    Interlocked.Exchange(ref m_cancellationSource, new CancellationTokenSource()).Dispose();
+            }
+        }
+
+        /// <summary>
+        /// Gets or sets the <see cref="IArchive"/> used by the web service for its data.
+        /// </summary>
+        public override IArchive Archive
+        {
+            get
+            {
+                return base.Archive;
+            }
+            set
+            {
+                if ((object)base.Archive != null)
+                    base.Archive.MetadataUpdated -= Archive_MetadataUpdated;
+
+                base.Archive = value;
+
+                if ((object)base.Archive != null)
+                    base.Archive.MetadataUpdated += Archive_MetadataUpdated;
+
+                // Update data source metadata when an archive is defined, adapter should exist by then
+                if ((object)m_dataSource.Metadata == null && Enabled)
+                    Archive_MetadataUpdated(this, EventArgs.Empty);
+            }
+        }
+
+        #endregion
+
+        #region [ Methods ]
+
+        private void Archive_MetadataUpdated(object sender, EventArgs e)
+        {
+            LocalOutputAdapter adapter;
+
+            if (LocalOutputAdapter.Instances.TryGetValue(m_dataSource.InstanceName, out adapter))
+                m_dataSource.Metadata = adapter.DataSource;
+        }
+
+        /// <summary>
+        /// Releases the unmanaged resources used by the <see cref="GrafanaDataService"/> object and optionally releases the managed resources.
+        /// </summary>
+        /// <param name="disposing">true to release both managed and unmanaged resources; false to release only unmanaged resources.</param>
+        protected override void Dispose(bool disposing)
+        {
+            if (!m_disposed)
+            {
+                try
+                {
+                    if (disposing)
+                        m_cancellationSource.Dispose();
+                }
+                finally
+                {
+                    m_disposed = true;          // Prevent duplicate dispose.
+                    base.Dispose(disposing);    // Call base class Dispose().
+                }
+            }
+        }
+
+        /// <summary>
+        /// Initializes the web service.
+        /// </summary>
+        public override void Initialize()
+        {
+            // Get historian instance name as assigned to settings category by data services host
+            m_dataSource.InstanceName = SettingsCategory.Substring(0, SettingsCategory.IndexOf(GetType().Name, StringComparison.OrdinalIgnoreCase));
+
+            base.Initialize();
+        }
+
+        /// <summary>
+        /// Validates that openHistorian Grafana data source is responding as expected.
+        /// </summary>
+        public void TestDataSource()
+        {
+        }
+
+        /// <summary>
+        /// Queries openHistorian as a Grafana data source.
+        /// </summary>
+        /// <param name="request">Query request.</param>
+        public Task<List<TimeSeriesValues>> Query(QueryRequest request)
+        {
+            // Abort if services are not enabled
+            if (!Enabled || (object)Archive == null)
+                return null;
+
+            return m_dataSource.Query(request, m_cancellationSource.Token);
+        }
+
+        /// <summary>
+        /// Search openHistorian for a target.
+        /// </summary>
+        /// <param name="request">Search target.</param>
+        public Task<string[]> Search(Target request)
+        {
+            return m_dataSource.Search(request);
+        }    
+
+        /// <summary>
+        /// Queries openHistorian for annotations in a time-range (e.g., Alarms).
+        /// </summary>
+        /// <param name="request">Annotation request.</param>
+        public Task<List<AnnotationResponse>> Annotations(AnnotationRequest request)
+        {
+            // Abort if services are not enabled
+            if (!Enabled || (object)Archive == null)
+                return null;
+
+            return m_dataSource.Annotations(request, m_cancellationSource.Token);
+        }
+
+        #endregion
+    }
+}

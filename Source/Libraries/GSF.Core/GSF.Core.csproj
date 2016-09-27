@@ -188,6 +188,7 @@
     <Compile Include="Console\CommandResponse.cs" />
     <Compile Include="Collections\IPagedList.cs" />
     <Compile Include="Data\Model\ITableOperations.cs" />
+    <Compile Include="Data\Model\SearchableAttribute.cs" />
     <Compile Include="Data\Model\UseEscapedNameAttribute.cs" />
     <Compile Include="Data\Model\TableNameAttribute.cs" />
     <Compile Include="Data\Model\FieldNameAttribute.cs" />
@@ -201,6 +202,7 @@
     <Compile Include="Data\Model\RecordRestriction.cs" />
     <Compile Include="Data\Model\TableOperations.cs" />
     <Compile Include="Collections\PagedList.cs" />
+    <Compile Include="Drawing\Point.cs" />
     <Compile Include="Encoding7Bit.cs" />
     <Compile Include="Identity\IUserInfo.cs" />
     <Compile Include="Identity\UnixUserInfo.cs" />
@@ -350,6 +352,8 @@
     <Compile Include="NtpTimeTag.cs" />
     <Compile Include="NumericalAnalysis\CurveFit.cs" />
     <Compile Include="NumericalAnalysis\Euclidean.cs" />
+    <Compile Include="NumericalAnalysis\Interpolation\InverseDistanceWeightingFunction.cs" />
+    <Compile Include="NumericalAnalysis\Interpolation\PiecewiseLinearFunction.cs" />
     <Compile Include="NumericalAnalysis\NamespaceDoc.cs" />
     <Compile Include="NumericalAnalysis\NumericalAnalysisExtensions.cs" />
     <Compile Include="NumericalAnalysis\RealTimeSlope.cs" />
@@ -377,6 +381,7 @@
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Range.cs" />
     <Compile Include="Reflection\NamespaceDoc.cs" />
+    <Compile Include="Threading\CompatibleCancellationToken.cs" />
     <Compile Include="Trackable.cs" />
     <Compile Include="ReusableObjectPool.cs" />
     <Compile Include="Scheduling\NamespaceDoc.cs" />

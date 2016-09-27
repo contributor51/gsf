@@ -31,7 +31,7 @@ namespace GSF.Threading
     /// </summary>
     public static class ActionExtensions
     {
-        // Cancellatin token to cancel delayed operations.
+        // Cancellation token to cancel delayed operations.
         private class DelayCancellationToken : ICancellationToken
         {
             #region [ Members ]
@@ -55,6 +55,28 @@ namespace GSF.Threading
 
             #endregion
 
+            #region [ Properties ]
+
+            public bool IsCancelled
+            {
+                get
+                {
+                    if (Interlocked.CompareExchange(ref m_state, 0, 0) != Idle)
+                        return true;
+
+                    try
+                    {
+                        return WaitObj.WaitOne(0);
+                    }
+                    catch
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            #endregion
+
             #region [ Methods ]
 
             public bool Cancel()
@@ -62,19 +84,19 @@ namespace GSF.Threading
                 // If the token is not idle, that means that either a Cancel
                 // operation is in progress or the token has been disposed
                 if (Interlocked.CompareExchange(ref m_state, Busy, Idle) != Idle)
-                    return true;
+                    return false;
 
                 try
                 {
                     // Determine whether the wait
                     // handle has already been set
                     if (WaitObj.WaitOne(0))
-                        return true;
+                        return false;
 
                     // Set the wait handle and return a value indicating
                     // that the token was not previously cancelled
                     WaitObj.Set();
-                    return false;
+                    return true;
                 }
                 finally
                 {
@@ -147,7 +169,7 @@ namespace GSF.Threading
                 // Even if the callback timed out, another thread may cancel
                 // the cancellation token before we are able to dispose of it
                 // so we explicitly cancel the token in order to be sure
-                timeout = timeout && !cancellationToken.Cancel();
+                timeout = timeout && cancellationToken.Cancel();
 
                 // Both the callback thread and the caller thread will
                 // attempt to set the wait handle lock to null, and the

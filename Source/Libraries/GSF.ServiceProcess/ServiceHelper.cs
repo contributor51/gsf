@@ -1466,6 +1466,12 @@ namespace GSF.ServiceProcess
             if ((object)m_remotingServer == null)
                 throw new InvalidOperationException("RemotingServer property of ServiceHelper component is not set");
 
+            // Open log file if file logging is enabled.
+            // Make sure to do this before calling OnServiceStarting
+            // in case messages need to be logged by the handler.
+            if (m_logStatusUpdates)
+                m_statusLog.Open();
+
             OnServiceStarting(args);
 
             lock (m_clientRequestHandlers)
@@ -1530,10 +1536,6 @@ namespace GSF.ServiceProcess
                 m_serviceComponents.Add(m_errorLogger.ErrorLog);
                 m_serviceComponents.Add(m_remotingServer);
             }
-
-            // Open log file if file logging is enabled.
-            if (m_logStatusUpdates)
-                m_statusLog.Open();
 
             // Start all of the core components.
             m_processScheduler.Start();
@@ -4497,7 +4499,7 @@ namespace GSF.ServiceProcess
                 //  Current system time: yyyy-MM-dd HH:mm:ss.fff, yyyy-MM-dd HH:mm:ss.fff UTC
                 // Total system runtime: xx days yy hours zz minutes ii seconds
                 if ((object)m_remotingServer != null)
-                    message = $" Current system time: {DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff")}, {DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss.fff")} UTC\r\nTotal system runtime: {m_remotingServer.RunTime}";
+                    message = $" Current system time: {DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff")}, {DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss.fff")} UTC\r\nTotal system runtime: {m_remotingServer.RunTime.ToString(3)}";
                 else
                     message = $"Current system time: {DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff")}, {DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss.fff")} UTC";
 

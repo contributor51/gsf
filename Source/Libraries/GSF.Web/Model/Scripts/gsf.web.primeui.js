@@ -20,6 +20,7 @@
 //       Generated original version of source code.
 //
 //******************************************************************************************************
+// ReSharper disable UndeclaredGlobalVariableUsing
 
 // Grid Solutions Framework Core Web PrimeUI Extension Script Functions
 "use strict";
@@ -30,9 +31,12 @@ function getPrimeUIWidget(jqueryElement, widgetType) {
 }
 
 // Adds auto-complete lookup functionality to an input field element associated with a paged-view model 
-function initializeAutoCompleteLookupField(fieldName, loadRecordsHubFunction, isObservable, addShowAllDropDown, limit) {
+function initializeAutoCompleteLookupField(fieldName, loadRecordsHubFunction, isObservable, addInputGroup, addShowAllDropDown, limit) {
     if (isObservable === undefined)
         isObservable = true;
+
+    if (addInputGroup === undefined)
+        addInputGroup = true;
 
     if (addShowAllDropDown === undefined)
         addShowAllDropDown = true;
@@ -46,12 +50,12 @@ function initializeAutoCompleteLookupField(fieldName, loadRecordsHubFunction, is
     // Turn off browser remembered field values when doing auto-complete lookups
     inputField.attr("autocomplete", "off");
 
-    if (isObservable)
+    if (addInputGroup)
         inputField.wrap("<div class=\"input-group\"></div>");
 
     if (addShowAllDropDown && viewModel.canEdit()) {
         // Insert drop-down button after input field
-        inputField.after("<span id=\"" + inputFieldID + "ShowAll\" class=\"input-group-addon\" data-bind=\"style: {'cursor': ($root.recordMode()===RecordMode.View ? 'not-allowed' : 'pointer')}\"><i class=\"glyphicon glyphicon-triangle-bottom\"></i></span>");
+        inputField.after("<span id=\"" + inputFieldID + "ShowAll\" class=\"input-group-addon\" data-bind=\"style: {'cursor': ($root.recordMode()===RecordMode.View ? 'not-allowed' : 'pointer')}, visible: $root.recordMode()!==RecordMode.View\"><i class=\"glyphicon glyphicon-triangle-bottom\"></i></span>");
 
         const inputFieldDropDown = $("#" + inputFieldID + "ShowAll");
 

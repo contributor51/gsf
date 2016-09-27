@@ -177,6 +177,7 @@
     <Compile Include="Statistics\StatisticValueStateCache.cs" />
     <Compile Include="TimeSeriesStartupOperations.cs" />
     <Compile Include="BufferBlockMeasurement.cs" />
+    <Compile Include="Transport\SubscriberRightsLookup.cs" />
     <Compile Include="Transport\ClientConnection.cs" />
     <Compile Include="Transport\Common.cs" />
     <Compile Include="Transport\DataPublisher.cs" />
@@ -273,6 +274,11 @@
     <Content Include="Data\PostgreSQL\SampleDataSet.sql" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+  <PropertyGroup>
+    <ResolveAssemblyWarnOrErrorOnTargetArchitectureMismatch>
+      None
+    </ResolveAssemblyWarnOrErrorOnTargetArchitectureMismatch>
+  </PropertyGroup>
   <PropertyGroup>
     <PostBuildEvent>CALL "$(ProjectDir)PostBuildSetup.bat" "$(TargetDir)Data" "$(ProjectDir)Data\*.*"</PostBuildEvent>
   </PropertyGroup>

@@ -40,6 +40,14 @@
     // Setup page control scripts
     StringBuilder pageControlScripts = ViewBag.PageControlScripts;
 
+    pageControlScripts.AppendFormat(@"
+    <script>
+        $(""#titleText"").html(""{0}: <span data-bind='text: recordCount'>calculating...</span>"");
+    </script>
+    ",
+        ViewBag.RecordsTitle ?? "Records"
+    );
+
     pageControlScripts.Append(string.Format(@"
     <script src=""{0}""></script>
     <script src=""{1}""></script>
@@ -73,6 +81,9 @@
 
     // Hide export to CSV button
     bool hideExportCSVButton = ViewBag.HideExportCSVButton ?? false;
+
+    // Define label for export CSV button
+    string exportCSVLabel = (ViewBag.ExportCSVLabel ?? "Export&nbsp;CSV").Replace(" ", "&nbsp;");
 
     // Hide unauthorized controls as disallowed by Edit/AddNew/Delete roles - otherwise unauthorized controls will be disabled
     bool hideUnauthorizedControls = ViewBag.HideUnauthorizedControls ?? false;
@@ -123,6 +134,9 @@
             return value.Substring(0, value.Length - 1);
 
         if (value.EndsWith("les", StringComparison.OrdinalIgnoreCase))
+            return value.Substring(0, value.Length - 1);
+
+        if (value.EndsWith("pes", StringComparison.OrdinalIgnoreCase))
             return value.Substring(0, value.Length - 1);
 
         if (value.EndsWith("es", StringComparison.OrdinalIgnoreCase))
@@ -218,7 +232,7 @@
             {
                 <span class="pull-right">&nbsp;</span>
                 <a role="button" class="btn btn-sm btn-default pull-right" id="exportCSVButton" hub-dependent>
-                    <span class="glyphicon glyphicon-download"></span>&nbsp;&nbsp;Export&nbsp;CSV
+                    <span class="glyphicon glyphicon-download"></span>&nbsp;&nbsp;@Raw(exportCSVLabel)
                 </a>
                 <a id="exportCSVLink" download hidden></a>
             }

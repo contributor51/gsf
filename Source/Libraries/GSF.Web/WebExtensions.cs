@@ -36,6 +36,7 @@ using System.Web.Mvc;
 using GSF.Collections;
 using GSF.IO;
 using GSF.Web.Model;
+using Newtonsoft.Json;
 using RazorEngine.Templating;
 using HtmlHelper = System.Web.Mvc.HtmlHelper;
 
@@ -188,6 +189,17 @@ namespace GSF.Web
         }
 
         /// <summary>
+        /// Parses a JSON timestamp into a .NET <see cref="DateTime"/>.
+        /// </summary>
+        /// <param name="timestamp">JSON timestamp.</param>
+        /// <returns>.NET <see cref="DateTime"/> parsed from JSON <paramref name="timestamp"/>.</returns>
+        public static DateTime ParseJsonTimestamp(this string timestamp)
+        {
+            DateTimeOffset dto = JsonConvert.DeserializeObject<DateTimeOffset>($"\"{timestamp}\"");
+            return dto.UtcDateTime;
+        }
+
+        /// <summary>
         /// Corrects script alignment with a desired number of forward spaces.
         /// </summary>
         /// <param name="script">Script text.</param>
@@ -221,7 +233,7 @@ namespace GSF.Web
         /// <returns></returns>
         public static Dictionary<string, string> QueryParameters(this HttpRequestMessage request)
         {
-            return request.GetQueryNameValuePairs().ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
+            return request.GetQueryNameValuePairs().ToDictionary(kvp => kvp.Key, kvp => kvp.Value, StringComparer.OrdinalIgnoreCase);
         }
 
         /// <summary>

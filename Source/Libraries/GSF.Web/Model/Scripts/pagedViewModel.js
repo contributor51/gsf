@@ -20,6 +20,7 @@
 //       Generated original version of source code.
 //
 //******************************************************************************************************
+// ReSharper disable UndeclaredGlobalVariableUsing
 
 // Paged view model base class scripts
 "use strict";
@@ -497,14 +498,14 @@ function PagedViewModel() {
         });
     }
 
-    self.addPageRecord = function() {
+    self.addPageRecord = function(sourceRecord) {
         if (!self.canAddNew())
             return;
 
         if (self.dataHubIsConnected()) {
             self.newRecord().done(function(emptyRecord) {
                 // Raise event to allow any new record initialization
-                $(self).trigger("newRecord", [emptyRecord]);
+                $(self).trigger("newRecord", [emptyRecord, sourceRecord]);
 
                 self.deriveObservableRecord(emptyRecord).done(function(observableRecord) {
                     self.recordMode(RecordMode.AddNew);
@@ -543,8 +544,6 @@ var viewModel = new PagedViewModel();
 
 (function($, viewPort) {
     $("#bodyContainer").addClass("fill-height");
-
-    $("#titleText").html("Records: <span data-bind='text: recordCount'>calculating...</span>");
 
     $("#firstPageButton").click(function() {
         viewModel.currentPage(1);

@@ -906,7 +906,7 @@ namespace GSF.Data
             using (IDbCommand command = connection.CreateCommand())
             {
                 StringBuilder statementBuilder = new StringBuilder();
-                Regex comment = new Regex(@"/\*.*\*/|--.*\n", RegexOptions.Multiline);
+                Regex comment = new Regex(@"/\*.*\*/|--.*(?=\n)", RegexOptions.Multiline);
 
                 while ((object)line != null)
                 {
@@ -963,7 +963,7 @@ namespace GSF.Data
             using (IDbCommand command = connection.CreateCommand())
             {
                 StringBuilder statementBuilder = new StringBuilder();
-                Regex comment = new Regex(@"/\*.*\*/|--.*\n", RegexOptions.Multiline);
+                Regex comment = new Regex(@"/\*.*\*/|--.*(?=\n)", RegexOptions.Multiline);
 
                 while ((object)line != null)
                 {
@@ -1025,7 +1025,7 @@ namespace GSF.Data
             using (IDbCommand command = connection.CreateCommand())
             {
                 StringBuilder statementBuilder = new StringBuilder();
-                Regex comment = new Regex(@"/\*.*\*/|--.*\n", RegexOptions.Multiline);
+                Regex comment = new Regex(@"/\*.*\*/|--.*(?=\n)", RegexOptions.Multiline);
 
                 while ((object)line != null)
                 {
@@ -2736,9 +2736,9 @@ namespace GSF.Data
                     if (!command.Parameters.Contains(token))
                         command.AddParameterWithValue(token, values[i++]);
                 }
-
-                command.CommandText = sql;
             }
+
+            command.CommandText = sql;
         }
 
         private static bool IsValidToken(string token)

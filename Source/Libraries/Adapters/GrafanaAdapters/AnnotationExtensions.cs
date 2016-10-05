@@ -25,6 +25,8 @@ using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Linq;
+using System.Text;
+using GSF;
 using GSF.TimeSeries;
 using GSF.TimeSeries.Adapters;
 
@@ -105,6 +107,7 @@ namespace GrafanaAdapters
                     throw new InvalidOperationException("Cannot determine data point applicability for specified annotation type.");
             }
         }
+
         /// <summary>
         /// Populates an annotation response title, text and tags for specified annotation <paramref name="type"/>.
         /// </summary>
@@ -113,8 +116,9 @@ namespace GrafanaAdapters
         /// <param name="target">Target of annotation response.</param>
         /// <param name="definition">Associated metadata definition for response.</param>
         /// <param name="datapoint">Time series values data point for response.</param>
+        /// <param name="source">Metadata of source definitions.</param>
         /// <returns>Populates an annotation response title, text and tags for specified annotation <paramref name="type"/>.</returns>
-        public static void PopulateResponse(this AnnotationType type, AnnotationResponse response, string target, DataRow definition, double[] datapoint)
+        public static void PopulateResponse(this AnnotationType type, AnnotationResponse response, string target, DataRow definition, double[] datapoint, DataSet source)
         {
             if ((object)response == null)
                 throw new ArgumentNullException(nameof(response));
@@ -132,9 +136,10 @@ namespace GrafanaAdapters
             {
                 case AnnotationType.RaisedAlarms:
                 case AnnotationType.ClearedAlarms:
+                    DataRow metadata = GetTargetMetaData(source, definition["SignalID"]);
                     response.title = $"Alarm {(type == AnnotationType.RaisedAlarms ? "Raised" : "Cleared")}";
-                    response.text = $"{definition["Description"]}<br>Severity = {definition["Severity"]}<br>{definition["TagName"]}";
-                    response.tags = $"{GetTargetFromGuid(definition["SignalID"].ToString())}, {target}";
+                    response.text = $"{definition["Description"]}<br/>Condition:&nbsp;{GetAlarmCondition(definition)}<br/>Severity:&nbsp;{definition["Severity"]}<br/>[{metadata["ID"]}]:&nbsp;{metadata["SignalReference"]}";
+                    response.tags = $"{metadata["PointTag"]}, {target}";
                     break;
                 default:
                     throw new InvalidOperationException("Cannot populate response information for specified annotation type.");
@@ -175,41 +180,49 @@ namespace GrafanaAdapters
             if ((object)annotation == null)
                 throw new ArgumentNullException(nameof(annotation));
 
-            useFilterExpression = false;
+            string query = annotation.query ?? "";
 
-            AnnotationType type = AnnotationType.Undefined;
-            string tableName, expression, sortField, query = annotation.query ?? "";
-            int takeCount;
-
-            if (AdapterBase.ParseFilterExpression(query, out tableName, out expression, out sortField, out takeCount))
+            Tuple<AnnotationType, bool> result = TargetCache.GetOrAdd(query, () =>
             {
-                useFilterExpression = true;
+                AnnotationType type = AnnotationType.Undefined;
+                string tableName, expression, sortField;
+                int takeCount;
+                bool parsedFilterExpression = false;
 
-                switch (tableName.ToUpperInvariant())
+                if (AdapterBase.ParseFilterExpression(query, out tableName, out expression, out sortField, out takeCount))
                 {
-                    case "RAISEDALARMS":
-                        type = AnnotationType.RaisedAlarms;
-                        break;
-                    case "CLEAREDALARMS":
-                        type = AnnotationType.ClearedAlarms;
-                        break;
-                    default:
-                        throw new InvalidOperationException("Invalid FILTER table for annotation query expression.");
+                    parsedFilterExpression = true;
+
+                    switch (tableName.ToUpperInvariant())
+                    {
+                        case "RAISEDALARMS":
+                            type = AnnotationType.RaisedAlarms;
+                            break;
+                        case "CLEAREDALARMS":
+                            type = AnnotationType.ClearedAlarms;
+                            break;
+                        default:
+                            throw new InvalidOperationException("Invalid FILTER table for annotation query expression.");
+                    }
                 }
-            }
-            else if (query.StartsWith("#RaisedAlarms", StringComparison.OrdinalIgnoreCase))
-            {
-                type = AnnotationType.RaisedAlarms;
-            }
-            else if (query.StartsWith("#ClearedAlarms", StringComparison.OrdinalIgnoreCase))
-            {
-                type = AnnotationType.ClearedAlarms;
-            }
+                else if (query.StartsWith("#RaisedAlarms", StringComparison.OrdinalIgnoreCase))
+                {
+                    type = AnnotationType.RaisedAlarms;
+                }
+                else if (query.StartsWith("#ClearedAlarms", StringComparison.OrdinalIgnoreCase))
+                {
+                    type = AnnotationType.ClearedAlarms;
+                }
 
-            if (type == AnnotationType.Undefined)
-                throw new InvalidOperationException("Unrecognized type or syntax for annotation query expression.");
+                if (type == AnnotationType.Undefined)
+                    throw new InvalidOperationException("Unrecognized type or syntax for annotation query expression.");
 
-            return type;
+                return new Tuple<AnnotationType, bool>(type, parsedFilterExpression);
+            });
+
+            useFilterExpression = result.Item2;
+
+            return result.Item1;
         }
 
         /// <summary>
@@ -246,35 +259,39 @@ namespace GrafanaAdapters
                 throw new InvalidOperationException("Unrecognized type or syntax for annotation query expression.");
 
             string query = annotation.query ?? "";
-            DataRow[] rows;
 
-            if (useFilterExpression)
+            return TargetCache.GetOrAdd(query, () =>
             {
-                string tableName, expression, sortField;
-                int takeCount;
+                DataRow[] rows;
 
-                if (AdapterBase.ParseFilterExpression(query, out tableName, out expression, out sortField, out takeCount))
-                    rows = source.Tables[tableName.Translate()].Select(expression, sortField).Take(takeCount).ToArray();
+                if (useFilterExpression)
+                {
+                    string tableName, expression, sortField;
+                    int takeCount;
+
+                    if (AdapterBase.ParseFilterExpression(query, out tableName, out expression, out sortField, out takeCount))
+                        rows = source.Tables[tableName.Translate()].Select(expression, sortField).Take(takeCount).ToArray();
+                    else
+                        throw new InvalidOperationException("Invalid FILTER syntax for annotation query expression.");
+                }
                 else
-                    throw new InvalidOperationException("Invalid FILTER syntax for annotation query expression.");
-            }
-            else
-            {
-                // Assume all records if no filter expression was provided
-                rows = source.Tables[type.TableName().Translate()].Rows.Cast<DataRow>().ToArray();
-            }
+                {
+                    // Assume all records if no filter expression was provided
+                    rows = source.Tables[type.TableName().Translate()].Rows.Cast<DataRow>().ToArray();
+                }
 
-            Dictionary<string, DataRow> definitions = new Dictionary<string, DataRow>(StringComparer.OrdinalIgnoreCase);
+                Dictionary<string, DataRow> definitions = new Dictionary<string, DataRow>(StringComparer.OrdinalIgnoreCase);
 
-            foreach (DataRow row in rows)
-            {
-                MeasurementKey key = GetTargetFromGuid(row[type.TargetFieldName()].ToString());
+                foreach (DataRow row in rows)
+                {
+                    MeasurementKey key = GetTargetFromGuid(row[type.TargetFieldName()].ToString());
 
-                if (key != MeasurementKey.Undefined)
-                    definitions[key.ID.ToString()] = row;
-            }
+                    if (key != MeasurementKey.Undefined)
+                        definitions[key.TagFromKey(source)] = row;
+                }
 
-            return definitions;
+                return definitions;
+            });
         }
 
         /// <summary>
@@ -293,6 +310,125 @@ namespace GrafanaAdapters
             return request.annotation.ParseSourceDefinitions(type, source, useFilterExpression);
         }
 
+        /// <summary>
+        /// Looks up point tag from measurement <paramref name="key"/> value.
+        /// </summary>
+        /// <param name="key"><see cref="MeasurementKey"/> to lookup.</param>
+        /// <param name="source">Source metadata.</param>
+        /// <returns>Point tag name from source metadata.</returns>
+        /// <remarks>
+        /// This function uses the <see cref="DataTable.Select(string)"/> function which uses a linear
+        /// search algorithm that can be slow for large data sets, it is recommended that any results
+        /// for calls to this function be cached to improve performance.
+        /// </remarks>
+        internal static string TagFromKey(this MeasurementKey key, DataSet source)
+        {
+            DataRow record = GetMetaData(source, "ActiveMeasurements", $"ID = '{key}'");
+            return (object)record == null ? key.ToString() : record["PointTag"].ToNonNullString(key.ToString());
+        }
+
+        /// <summary>
+        /// Looks up measurement key from point tag.
+        /// </summary>
+        /// <param name="pointTag">Point tag to lookup.</param>
+        /// <param name="source">Source metadata.</param>
+        /// <returns>Measurement key from source metadata.</returns>
+        /// <remarks>
+        /// This function uses the <see cref="DataTable.Select(string)"/> function which uses a linear
+        /// search algorithm that can be slow for large data sets, it is recommended that any results
+        /// for calls to this function be cached to improve performance.
+        /// </remarks>
+        internal static MeasurementKey KeyFromTag(this string pointTag, DataSet source)
+        {
+            DataRow record = GetMetaData(source, "ActiveMeasurements", $"PointTag = '{pointTag}'");
+
+            if ((object)record == null)
+                return MeasurementKey.Undefined;
+
+            try
+            {
+                return MeasurementKey.LookUpOrCreate(record["SignalID"].ToNonNullString(Guid.Empty.ToString()).ConvertToType<Guid>(), record["ID"].ToString());
+            }
+            catch
+            {
+                return MeasurementKey.Undefined;
+            }
+        }
+
+        private static DataRow GetMetaData(DataSet source, string table, string expression)
+        {
+            try
+            {
+                DataRow[] filteredRows = source.Tables[table].Select(expression);
+                return filteredRows.Length > 0 ? filteredRows[0] : null;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
         private static MeasurementKey GetTargetFromGuid(string guidID) => MeasurementKey.LookUpBySignalID(Guid.Parse(guidID));
+
+        private static DataRow GetTargetMetaData(DataSet source, object value)
+        {
+            string target = value.ToNonNullNorWhiteSpace(Guid.Empty.ToString());
+            return TargetCache.GetOrAdd(target, () => GetMetaData(source, "ActiveMeasurements", $"ID = '{GetTargetFromGuid(target)}'"));
+        }
+
+        private static string GetAlarmCondition(DataRow defintion)
+        {
+            StringBuilder description;
+
+            description = new StringBuilder("value");
+
+            AlarmOperation operation;
+
+            if (!Enum.TryParse(defintion["Operation"].ToNonNullNorWhiteSpace(AlarmOperation.Equal.ToString()), out operation))
+                operation = AlarmOperation.Equal;
+
+            switch (operation)
+            {
+                case AlarmOperation.Equal:
+                    description.Append(" = ");
+                    break;
+
+                case AlarmOperation.NotEqual:
+                    description.Append(" != ");
+                    break;
+
+                case AlarmOperation.GreaterOrEqual:
+                    description.Append(" >= ");
+                    break;
+
+                case AlarmOperation.LessOrEqual:
+                    description.Append(" <= ");
+                    break;
+
+                case AlarmOperation.GreaterThan:
+                    description.Append(" > ");
+                    break;
+
+                case AlarmOperation.LessThan:
+                    description.Append(" < ");
+                    break;
+
+                case AlarmOperation.Flatline:
+                    description.Append(" flat-lined for ");
+                    description.Append(defintion["Delay"]);
+                    description.Append(" seconds");
+                    return description.ToString();
+
+                default:
+                    description.Append(operation.GetDescription());
+                    break;
+            }
+
+            string setPoint = defintion["SetPoint"].ToNonNullString();
+
+            description.Append(string.IsNullOrWhiteSpace(setPoint) ? "undefined" : setPoint);
+
+            return description.ToString();
+        }
     }
 }

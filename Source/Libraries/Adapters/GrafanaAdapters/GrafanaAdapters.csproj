@@ -50,6 +50,7 @@
   <ItemGroup>
     <Reference Include="System" />
     <Reference Include="System.Core" />
+    <Reference Include="System.Runtime.Caching" />
     <Reference Include="System.ServiceModel" />
     <Reference Include="System.ServiceModel.Web" />
     <Reference Include="System.Xml.Linq" />
@@ -75,6 +76,7 @@
     <Compile Include="RangeRaw.cs" />
     <Compile Include="Table.cs" />
     <Compile Include="Target.cs" />
+    <Compile Include="TargetCache.cs" />
     <Compile Include="TimeSeriesValues.cs" />
   </ItemGroup>
   <ItemGroup>

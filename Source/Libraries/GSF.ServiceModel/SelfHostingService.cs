@@ -57,6 +57,9 @@
 //  12/11/2013 - Pinal C. Patel
 //       Added WindowsAuthentication property to allow Windows Authentication to be enabled explicitly
 //       even if SecurityPolicy is not configured to allow for more flexibility.
+//  09/28/2016 - J. Ritchie Carroll
+//       Added AutomaticFormatSelectionEnabled property to allow for non-XML based, e.g., JSON,
+//       formats for exception messages.
 //
 //******************************************************************************************************
 
@@ -217,6 +220,11 @@ namespace GSF.ServiceModel
         private bool m_allowCrossDomainAccess;
         private string m_allowedDomainList;
         private bool m_windowsAuthentication;
+        private bool m_jsonFaultHandlingEnabled;
+        private bool m_faultExceptionEnabled;
+        private bool m_automaticFormatSelectionEnabled;
+        private WebMessageFormat m_defaultOutgoingRequestFormat;
+        private WebMessageFormat m_defaultOutgoingResponseFormat;
         private bool m_serviceEnabled;
         private bool m_disposed;
         private bool m_initialized;
@@ -237,6 +245,9 @@ namespace GSF.ServiceModel
             m_allowCrossDomainAccess = false;
             m_allowedDomainList = "*";
             m_serviceEnabled = true;
+            m_faultExceptionEnabled = true;
+            m_defaultOutgoingRequestFormat = WebMessageFormat.Xml;
+            m_defaultOutgoingResponseFormat = WebMessageFormat.Xml;
         }
 
         /// <summary>
@@ -310,7 +321,7 @@ namespace GSF.ServiceModel
             set
             {
                 if (string.IsNullOrEmpty(value))
-                    throw new ArgumentNullException("value");
+                    throw new ArgumentNullException(nameof(value));
 
                 m_contractInterface = value;
             }
@@ -422,6 +433,81 @@ namespace GSF.ServiceModel
             set
             {
                 m_serviceEnabled = value;
+            }
+        }
+
+        /// <summary>
+        /// Gets or sets a value that determines if JSON formatted fault messages should be returned during exceptions.
+        /// </summary>
+        public bool JsonFaultHandlingEnabled
+        {
+            get
+            {
+                return m_jsonFaultHandlingEnabled;
+            }
+            set
+            {
+                m_jsonFaultHandlingEnabled = value;
+            }
+        }
+
+        /// <summary>
+        /// Gets or sets a value that determines if automatic format selection is enabled for Web HTTP bindings.
+        /// </summary>
+        public bool AutomaticFormatSelectionEnabled
+        {
+            get
+            {
+                return m_automaticFormatSelectionEnabled;
+            }
+            set
+            {
+                m_automaticFormatSelectionEnabled = value;
+            }
+        }
+
+        /// <summary>
+        /// Gets or sets the flag that specifies whether a FaultException is generated when an internal server error(HTTP status code: 500) occurs for Web HTTP bindings.
+        /// </summary>
+        public bool FaultExceptionEnabled
+        {
+            get
+            {
+                return m_faultExceptionEnabled;
+            }
+            set
+            {
+                m_faultExceptionEnabled = value;
+            }
+        }
+
+        /// <summary>
+        /// Gets and sets the default outgoing request format for Web HTTP bindings.
+        /// </summary>
+        public WebMessageFormat DefaultOutgoingRequestFormat
+        {
+            get
+            {
+                return m_defaultOutgoingRequestFormat;
+            }
+            set
+            {
+                m_defaultOutgoingRequestFormat = value;
+            }
+        }
+
+        /// <summary>
+        /// Gets and sets the default outgoing response format for Web HTTP bindings.
+        /// </summary>
+        public WebMessageFormat DefaultOutgoingResponseFormat
+        {
+            get
+            {
+                return m_defaultOutgoingResponseFormat;
+            }
+            set
+            {
+                m_defaultOutgoingResponseFormat = value;
             }
         }
 
@@ -558,7 +644,7 @@ namespace GSF.ServiceModel
                 Match match = Regex.Match(endpoint, regex, RegexOptions.IgnoreCase);
 
                 if (match.Success && match.Groups["host"].Success)
-                    return string.Format("http://{0}", match.Groups["host"]);
+                    return $"http://{match.Groups["host"]}";
             }
 
             // Return an empty string if endpoints are not in a valid format.
@@ -611,7 +697,7 @@ namespace GSF.ServiceModel
                     Type securityPolicyType = Type.GetType(m_securityPolicy);
 
                     if ((object)securityPolicyType == null)
-                        throw new NullReferenceException(string.Format("Failed get security policy type '{0}' for self-hosting service - check config file settings.", m_securityPolicy.ToNonNullNorWhiteSpace("[undefined]")));
+                        throw new NullReferenceException($"Failed get security policy type '{m_securityPolicy.ToNonNullNorWhiteSpace("[undefined]")}' for self-hosting service - check config file settings.");
 
                     policies.Add((IAuthorizationPolicy)Activator.CreateInstance(securityPolicyType));
                     serviceBehavior.ExternalAuthorizationPolicies = policies.AsReadOnly();
@@ -639,18 +725,23 @@ namespace GSF.ServiceModel
                     Type contractInterfaceType = Type.GetType(m_contractInterface);
 
                     if ((object)contractInterfaceType == null)
-                        throw new NullReferenceException(string.Format("Failed to get contract interface type '{0}' for self-hosting service - check config file settings.", m_contractInterface.ToNonNullNorWhiteSpace("[undefined]")));
+                        throw new NullReferenceException($"Failed to get contract interface type '{m_contractInterface.ToNonNullNorWhiteSpace("[undefined]")}' for self-hosting service - check config file settings.");
 
                     serviceEndpoint = m_serviceHost.AddServiceEndpoint(contractInterfaceType, serviceBinding, serviceAddress);
 
                     if (serviceBinding is WebHttpBinding)
                     {
                         // Special handling for REST endpoint.
-                        WebHttpBehavior restBehavior = new WebHttpBehavior();
+                        WebHttpBehavior restBehavior = m_jsonFaultHandlingEnabled ? new JsonFaultWebHttpBehavior() : new WebHttpBehavior();
 #if !MONO
                         if (m_publishMetadata)
                             restBehavior.HelpEnabled = true;
 #endif
+                        restBehavior.FaultExceptionEnabled = m_faultExceptionEnabled;
+                        restBehavior.AutomaticFormatSelectionEnabled = m_automaticFormatSelectionEnabled;
+                        restBehavior.DefaultOutgoingRequestFormat = m_defaultOutgoingRequestFormat;
+                        restBehavior.DefaultOutgoingResponseFormat = m_defaultOutgoingResponseFormat;
+
                         serviceEndpoint.Behaviors.Add(restBehavior);
                     }
                     else if (m_publishMetadata)
